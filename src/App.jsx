@@ -962,7 +962,7 @@ export default function MathGame() {
                 const hidden=hiddenChoices.includes(c)&&!isCorrectAns;
                 let cbg=cardBg,cborder=borderColor,cc=mutedColor;
                 if (feedback) { if(isCorrectAns){cbg=`${level.color}18`;cborder=level.color;cc=level.color;} else if(selectedIdx===i){cbg="#ff446614";cborder="#ff4466";cc="#ff4466";} }
-                return (<button key={i} className="cbtn" onClick={()=>!hidden&&handleAnswer(i,c)} style={{ background:cbg,border:`1px solid ${cborder}`,color:hidden?"#1a3040":cc,padding:"20px 8px",fontSize:22,letterSpacing:2,borderRadius:12,cursor:feedback||hidden?"default":"pointer",boxShadow:feedback&&isCorrectAns?`0 0 16px ${level.color}44`:"none",fontFamily:"inherit",transition:"all 0.2s",opacity:hidden?0.2:1,minHeight:70,touchAction:"manipulation" }}>{hidden?"—":c}</button>);
+                return (<button key={i} className="cbtn" onClick={()=>!hidden&&handleAnswer(i,c)} style={{ background:cbg,border:`1px solid ${cborder}`,color:hidden?"#1a3040":"#ffffff",fontWeight:"bold",padding:"20px 8px",fontSize:22,letterSpacing:2,borderRadius:12,cursor:feedback||hidden?"default":"pointer",boxShadow:feedback&&isCorrectAns?`0 0 16px ${level.color}44`:"none",fontFamily:"inherit",transition:"all 0.2s",opacity:hidden?0.2:1,minHeight:70,touchAction:"manipulation" }}>{hidden?"—":c}</button>);
               })}
             </div>
           )}
