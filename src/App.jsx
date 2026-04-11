@@ -168,6 +168,7 @@ const INPUT_MODES = [
   { key:"speed",  label:"SPEED ROUND",     desc:"Score by how fast you answer" },
   { key:"drill",  label:"TOPIC DRILL",     desc:"Target one weakness" },
   { key:"race",   label:"RACE MODE",       desc:"2 players, same screen" },
+  { key:"audio",  label:"🎧 AUDIO ROUND",   desc:"Questions spoken aloud only" },
   { key:"sudoku", label:"SUDOKU",          desc:"Logic puzzle mode" },
 ];
 const DRILL_TOPICS = ["addition","subtraction","multiplication","division","algebra","percentages","powers","roots","averages","estimation","expressions"];
@@ -184,6 +185,38 @@ function playSound(type) {
     else if (type==="levelup") { [523,659,784,1047].forEach((f,i)=>{ const o2=ctx.createOscillator(),g2=ctx.createGain(); o2.connect(g2);g2.connect(ctx.destination); o2.frequency.value=f; g2.gain.setValueAtTime(0.2,ctx.currentTime+i*0.1); g2.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+i*0.1+0.2); o2.start(ctx.currentTime+i*0.1); o2.stop(ctx.currentTime+i*0.1+0.2); }); }
     else if (type==="streak") { o.frequency.setValueAtTime(880,ctx.currentTime); g.gain.setValueAtTime(0.2,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3); o.start(); o.stop(ctx.currentTime+0.3); }
   } catch(e) {}
+}
+
+
+// ── Speech Synthesis ──
+function speakText(text, onEnd) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const readable = text
+    .replace(/×/g, " times ")
+    .replace(/÷/g, " divided by ")
+    .replace(/−/g, " minus ")
+    .replace(/\+/g, " plus ")
+    .replace(/√/g, " square root of ")
+    .replace(/\^/g, " to the power of ")
+    .replace(/avg\(/g, "average of ")
+    .replace(/\)/g, " ")
+    .replace(/≈/g, " approximately ");
+  const u = new SpeechSynthesisUtterance(readable);
+  u.rate = 0.88;
+  u.pitch = 1.0;
+  u.volume = 1.0;
+  if (onEnd) u.onend = onEnd;
+  window.speechSynthesis.speak(u);
+}
+
+function stopSpeech() {
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+}
+
+// ── Speech Recognition ──
+function getSpeechRecognition() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
 export default function MathGame() {
@@ -228,6 +261,15 @@ export default function MathGame() {
   const [showHint, setShowHint] = useState(false);
   const [showStats, setShowStats] = useState(false);
 
+  // ── Audio round state ──
+  const [audioMode, setAudioMode] = useState(false);        // questions spoken, not shown
+  const [voiceAnswer, setVoiceAnswer] = useState(false);    // mic input for answers
+  const [isSpeaking, setIsSpeaking] = useState(false);      // TTS in progress
+  const [isListening, setIsListening] = useState(false);    // STT in progress
+  const [voiceTranscript, setVoiceTranscript] = useState(""); // what mic heard
+  const [voiceStatus, setVoiceStatus] = useState("");        // status message
+  const recognitionRef = useRef(null);
+
   // ── Race mode ──
   const [raceScores, setRaceScores] = useState([0,0]);
   const [raceRound, setRaceRound] = useState(0);
@@ -259,6 +301,7 @@ export default function MathGame() {
   const isSpeed = inputMode==="speed";
   const isType = inputMode==="type";
   const isRace = inputMode==="race";
+  const isAudio = inputMode==="audio" || audioMode;
   const bg = theme==="dark" ? "#050a0f" : "#f0f4f8";
   const cardBg = theme==="dark" ? "#0a1520" : "#ffffff";
   const textColor = theme==="dark" ? "#fff" : "#1a2530";
@@ -301,8 +344,74 @@ export default function MathGame() {
     setFeedback(null); setSelectedIdx(null); setTypedAnswer("");
     setTimeLeft(TOTAL_TIME); setStartTime(Date.now());
     setHiddenChoices([]); setHintUsed(false); setShowHint(false);
+    setVoiceTranscript(""); setVoiceStatus(""); setIsListening(false);
     setTimeout(()=>{ if(typeInputRef.current) typeInputRef.current.focus(); },100);
   }, [levelIdx,makeQuestion]);
+
+  // Speak question whenever current changes in audio mode
+  useEffect(() => {
+    if (current && (inputMode==="audio" || audioMode)) {
+      setTimeout(() => speakQuestion(current), 300);
+    }
+  }, [current, inputMode, audioMode]);
+
+  // ── Speak current question ──
+  function speakQuestion(q) {
+    if (!q) return;
+    setIsSpeaking(true);
+    const intro = audioMode ? "" : "";
+    const text = q.hint + ". " + q.question;
+    speakText(text, () => setIsSpeaking(false));
+  }
+
+  // ── Start voice recognition for answer ──
+  function startVoiceAnswer() {
+    const SR = getSpeechRecognition();
+    if (!SR) { setVoiceStatus("Speech recognition not supported on this browser."); return; }
+    if (isListening) { recognitionRef.current?.stop(); return; }
+    const r = new SR();
+    recognitionRef.current = r;
+    r.continuous = false;
+    r.interimResults = true;
+    r.lang = "en-US";
+    r.onstart = () => { setIsListening(true); setVoiceStatus("🎤 Listening..."); setVoiceTranscript(""); };
+    r.onresult = (e) => {
+      const t = Array.from(e.results).map(r=>r[0].transcript).join("").trim();
+      setVoiceTranscript(t);
+      if (e.results[e.results.length-1].isFinal) {
+        setIsListening(false);
+        setVoiceStatus("");
+        // Extract number from transcript
+        const words = { "zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,"nineteen":19,"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90,"hundred":100 };
+        let num = parseInt(t.replace(/[^0-9]/g,""), 10);
+        if (isNaN(num)) {
+          // Try word-to-number
+          const lower = t.toLowerCase();
+          let total = 0, curr = 0;
+          lower.split(/\s+/).forEach(w => {
+            if (words[w] !== undefined) {
+              if (words[w] === 100) { curr = (curr||1)*100; }
+              else if (words[w] >= 20) curr += words[w];
+              else curr += words[w];
+            }
+          });
+          total += curr;
+          if (total > 0) num = total;
+        }
+        if (!isNaN(num)) handleAnswer(null, num);
+        else setVoiceStatus(`Heard: "${t}" — couldn't parse a number. Try again.`);
+      }
+    };
+    r.onerror = (e) => { setIsListening(false); setVoiceStatus(e.error==="no-speech"?"No speech detected. Tap mic to retry.":`Error: ${e.error}`); };
+    r.onend = () => { setIsListening(false); };
+    r.start();
+  }
+
+  function stopVoiceAnswer() {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+    setVoiceStatus("");
+  }
 
   function handleStart() {
     const n=parseInt(inputVal,10);
@@ -534,6 +643,9 @@ export default function MathGame() {
     setSudokuHints(h=>h-1);
   }
 
+  // Stop speech when leaving game
+  useEffect(() => { return () => { stopSpeech(); stopVoiceAnswer(); }; }, []);
+
   const timerPct=(timeLeft/TOTAL_TIME)*100;
   const timerColor=timeLeft>10?level.color:timeLeft>5?"#ffcc00":"#ff4466";
   const adaptiveLabel=adaptiveLevel>0?"↑ HARDER":adaptiveLevel<0?"↓ EASIER":"ADAPTIVE";
@@ -561,8 +673,8 @@ export default function MathGame() {
             <div style={{ height:"100%", width:`${xpPct(xp)}%`, background:xpRank.color, boxShadow:`0 0 8px ${xpRank.color}`, transition:"width 0.5s" }} />
           </div>
           <div style={{ display:"flex", justifyContent:"space-between", marginTop:8 }}>
-            <span style={{ fontSize:9, color:mutedColor }}>🔥 DAILY STREAK: {dailyStreak.count} days</span>
-            <span style={{ fontSize:9, color:mutedColor }}>💡 HINTS: {powerups.fifty}×50/50 · {powerups.time}×+10s · {powerups.skip}×skip</span>
+            <span style={{ fontSize:11, color:textColor }}>🔥 {dailyStreak.count} day streak</span>
+            <span style={{ fontSize:10, color:mutedColor }}>💡 {powerups.fifty}×50/50 · {powerups.time}×+10s · {powerups.skip}×skip</span>
           </div>
         </div>
 
@@ -572,14 +684,14 @@ export default function MathGame() {
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
             <div style={{ fontSize:36, marginBottom:10 }}>🧮</div>
             <div>MATH TRAINING</div>
-            <div style={{ fontSize:9, color:"#00ff8877", marginTop:4, letterSpacing:1 }}>Arithmetic · Algebra · Advanced</div>
+            <div style={{ fontSize:11, color:"#00ff8899", marginTop:4, letterSpacing:1 }}>Arithmetic · Algebra · Advanced</div>
           </button>
           <button onClick={()=>startSudoku()} style={{ background:"transparent", border:"2px solid #00cfff", color:"#00cfff", padding:"28px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00cfff44", transition:"all 0.2s", minHeight:120 }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00cfff18";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
             <div style={{ fontSize:36, marginBottom:10 }}>🔢</div>
             <div>SUDOKU</div>
-            <div style={{ fontSize:9, color:"#00cfff77", marginTop:4, letterSpacing:1 }}>Logic · Pattern · Deduction</div>
+            <div style={{ fontSize:11, color:"#00cfff99", marginTop:4, letterSpacing:1 }}>Logic · Pattern · Deduction</div>
           </button>
         </div>
 
@@ -623,7 +735,7 @@ export default function MathGame() {
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
             <button onClick={()=>setAppMode("home")} style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", letterSpacing:2, minHeight:44 }}>← HOME</button>
             <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:9, color:mutedColor, letterSpacing:4 }}>SUDOKU</div>
+              <div style={{ fontSize:11, color:mutedColor, letterSpacing:4 }}>SUDOKU</div>
               <div style={{ fontSize:13, color:"#00cfff", letterSpacing:3 }}>{sudokuDiff.toUpperCase()}</div>
             </div>
             <div style={{ textAlign:"right" }}>
@@ -704,7 +816,7 @@ export default function MathGame() {
             <div style={{ textAlign:"center", padding:"20px", animation:"fadeIn 0.5s ease" }}>
               <div style={{ fontSize:28, marginBottom:8 }}>🎉</div>
               <div style={{ color:"#00ff88", fontSize:14, letterSpacing:4, marginBottom:8 }}>PUZZLE COMPLETE!</div>
-              <div style={{ color:mutedColor, fontSize:11 }}>Time: {fmt(sudokuTime)} · Mistakes: {sudokuMistakes}</div>
+              <div style={{ color:textColor, fontSize:13 }}>Time: {fmt(sudokuTime)} · Mistakes: {sudokuMistakes}</div>
               <button onClick={startSudoku} style={{ marginTop:16, background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"10px 32px", fontSize:12, letterSpacing:4, cursor:"pointer", borderRadius:6, fontFamily:"inherit" }}>NEW PUZZLE</button>
             </div>
           )}
@@ -774,9 +886,30 @@ export default function MathGame() {
                 const sel=inputMode===m.key;
                 return (<button key={m.key} onClick={()=>setInputMode(m.key)} style={{ background:sel?"#00ff8812":cardBg,border:`1px solid ${sel?"#00ff88":borderColor}`,borderRadius:10,padding:"14px 12px",cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s",textAlign:"left",boxShadow:sel?"0 0 12px #00ff8828":"none",minHeight:70,touchAction:"manipulation" }}>
                   <div style={{ fontSize:12,letterSpacing:2,color:sel?"#00ff88":mutedColor,marginBottom:4 }}>{m.label}</div>
-                  <div style={{ fontSize:11,color:sel?"#00ff8866":borderColor,lineHeight:1.4 }}>{m.desc}</div>
+                  <div style={{ fontSize:11,color:sel?"#00ff8899":mutedColor,lineHeight:1.4 }}>{m.desc}</div>
                 </button>);
               })}
+            </div>
+          </div>
+
+          {/* Audio options - show for all modes */}
+          <div style={{ ...panelStyle }}>
+            <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:10 }}>AUDIO OPTIONS</div>
+            <div style={{ display:"flex",gap:10,flexDirection:"column" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <div>
+                  <div style={{ fontSize:14,color:audioMode?"#ff6b35":textColor,letterSpacing:1,fontWeight:"bold" }}>🎧 Audio Questions</div>
+                  <div style={{ fontSize:11,color:mutedColor,marginTop:2 }}>Questions spoken aloud, hidden on screen</div>
+                </div>
+                <button onClick={()=>setAudioMode(a=>!a)} style={{ background:audioMode?"#ff6b3518":"transparent",border:`2px solid ${audioMode?"#ff6b35":borderColor}`,color:audioMode?"#ff6b35":mutedColor,padding:"10px 18px",fontSize:12,letterSpacing:2,cursor:"pointer",borderRadius:20,fontFamily:"inherit",minWidth:70,touchAction:"manipulation" }}>{audioMode?"ON":"OFF"}</button>
+              </div>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <div>
+                  <div style={{ fontSize:13,color:voiceAnswer?"#00cfff":textColor,letterSpacing:1 }}>🎤 Voice Answers</div>
+                  <div style={{ fontSize:10,color:mutedColor,marginTop:2 }}>Speak your answer into the mic</div>
+                </div>
+                <button onClick={()=>setVoiceAnswer(v=>!v)} style={{ background:voiceAnswer?"#00cfff18":"transparent",border:`2px solid ${voiceAnswer?"#00cfff":borderColor}`,color:voiceAnswer?"#00cfff":mutedColor,padding:"10px 18px",fontSize:12,letterSpacing:2,cursor:"pointer",borderRadius:20,fontFamily:"inherit",minWidth:70,touchAction:"manipulation" }}>{voiceAnswer?"ON":"OFF"}</button>
+              </div>
             </div>
           </div>
 
@@ -907,6 +1040,14 @@ export default function MathGame() {
             </div>
           </div>
 
+          {/* Audio controls row */}
+          {(isAudio||voiceAnswer)&&(
+            <div style={{ display:"flex",gap:8,justifyContent:"center",marginBottom:10,flexWrap:"wrap" }}>
+              {isAudio&&<div style={{ background:`#ff6b3518`,border:`1px solid #ff6b3544`,borderRadius:20,padding:"4px 14px",fontSize:11,color:"#ff6b35",letterSpacing:2 }}>🎧 AUDIO MODE</div>}
+              {voiceAnswer&&<div style={{ background:`#00cfff18`,border:`1px solid #00cfff44`,borderRadius:20,padding:"4px 14px",fontSize:11,color:"#00cfff",letterSpacing:2 }}>🎤 VOICE INPUT</div>}
+            </div>
+          )}
+
           {/* Badges */}
           <div style={{ display:"flex",gap:6,justifyContent:"center",marginBottom:10,flexWrap:"wrap" }}>
             <div style={{ background:`${diff.color}12`,border:`1px solid ${diff.color}44`,borderRadius:20,padding:"2px 10px",fontSize:8,letterSpacing:2,color:diff.color }}>{diff.label}</div>
@@ -941,16 +1082,28 @@ export default function MathGame() {
           {/* Question */}
           <div style={{ background:cardBg,border:`1px solid ${level.color}44`,borderRadius:10,padding:"26px 22px",marginBottom:14,textAlign:"center",animation:feedback==="wrong"?"shake 0.4s ease":"none",boxShadow:`0 0 30px ${level.color}08` }}>
             <div style={{ fontSize:12,color:mutedColor,letterSpacing:3,marginBottom:12 }}>{current.hint.toUpperCase()}</div>
-            <div style={{ fontSize:"clamp(32px,8vw,56px)",color:textColor,letterSpacing:3,textShadow:`0 0 20px ${level.color}55` }}>{current.question}</div>
-            {showHint&&current.steps&&<div style={{ marginTop:12,fontSize:10,color:mutedColor,borderTop:`1px solid ${borderColor}`,paddingTop:10 }}>💡 {current.steps[0]}</div>}
+            {isAudio && !feedback ? (
+              <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:16 }}>
+                <div style={{ fontSize:52 }}>{isSpeaking?"🔊":"👂"}</div>
+                <div style={{ fontSize:13,color:isSpeaking?level.color:mutedColor,letterSpacing:3,animation:isSpeaking?"pulse 1s infinite":"none" }}>
+                  {isSpeaking?"SPEAKING...":"QUESTION READY"}
+                </div>
+                <button onClick={()=>speakQuestion(current)} style={{ background:`${level.color}18`,border:`1px solid ${level.color}`,color:level.color,padding:"12px 24px",fontSize:12,letterSpacing:3,cursor:"pointer",borderRadius:20,fontFamily:"inherit",minHeight:44,touchAction:"manipulation" }}>🔁 REPEAT</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize:"clamp(32px,8vw,56px)",color:isAudio&&!feedback?"transparent":textColor,letterSpacing:3,textShadow:`0 0 20px ${level.color}55` }}>{current.question}</div>
+                {showHint&&current.steps&&<div style={{ marginTop:12,fontSize:10,color:mutedColor,borderTop:`1px solid ${borderColor}`,paddingTop:10 }}>💡 {current.steps[0]}</div>}
+              </>
+            )}
           </div>
 
           {/* Solution on wrong */}
           {feedback&&feedback!=="correct"&&(
             <div style={{ background:bg,border:`1px solid ${borderColor}`,borderRadius:8,padding:"12px 16px",marginBottom:12,animation:"fadeInFast 0.3s ease" }}>
               <div style={{ fontSize:8,color:mutedColor,letterSpacing:3,marginBottom:6 }}>SOLUTION</div>
-              {current.steps.map((s,i)=>(<div key={i} style={{ fontSize:10,color:i===current.steps.length-1?"#00ff88":"#5a8090",marginBottom:2 }}>{i===current.steps.length-1?"→ ":"  "}{s}</div>))}
-              {current.shortcut&&(<div style={{ marginTop:8,paddingTop:6,borderTop:`1px solid ${borderColor}` }}><span style={{ fontSize:8,color:"#ffcc00",letterSpacing:2 }}>💡 </span><span style={{ fontSize:9,color:"#ffcc0099" }}>{current.shortcut}</span></div>)}
+              {current.steps.map((s,i)=>(<div key={i} style={{ fontSize:10,color:i===current.steps.length-1?"#00ff88":textColor,marginBottom:2 }}>{i===current.steps.length-1?"→ ":"  "}{s}</div>))}
+              {current.shortcut&&(<div style={{ marginTop:8,paddingTop:6,borderTop:`1px solid ${borderColor}` }}><span style={{ fontSize:8,color:"#ffcc00",letterSpacing:2 }}>💡 </span><span style={{ fontSize:11,color:"#ffcc00bb" }}>{current.shortcut}</span></div>)}
             </div>
           )}
 
@@ -973,6 +1126,18 @@ export default function MathGame() {
               <input ref={typeInputRef} type="number" placeholder="Type answer..." value={typedAnswer} onChange={e=>setTypedAnswer(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")handleTypedSubmit();}} disabled={!!feedback} className="type-input"
                 style={{ flex:1,background:cardBg,border:`1px solid ${feedback==="correct"?level.color:feedback?"#ff4466":borderColor}`,color:textColor,padding:"18px 16px",fontSize:24,letterSpacing:2,borderRadius:12,fontFamily:"inherit",outline:"none",transition:"all 0.2s",minHeight:62 }} />
               <button onClick={handleTypedSubmit} disabled={!!feedback} style={{ background:feedback?"transparent":"#00ff8815",border:`1px solid ${feedback?borderColor:"#00ff88"}`,color:feedback?mutedColor:"#00ff88",padding:"0 20px",fontSize:14,letterSpacing:3,borderRadius:12,cursor:feedback?"default":"pointer",fontFamily:"inherit",minHeight:62,touchAction:"manipulation" }}>GO</button>
+            </div>
+          )}
+
+          {/* Voice Answer */}
+          {voiceAnswer&&!current.isEstimation&&!feedback&&(inputMode==="mcq"||inputMode==="audio"||isAudio)&&(
+            <div style={{ marginBottom:12 }}>
+              <button onClick={isListening?stopVoiceAnswer:startVoiceAnswer} style={{ width:"100%",background:isListening?"#00cfff18":"transparent",border:`2px solid ${isListening?"#00cfff":mutedColor}`,color:isListening?"#00cfff":mutedColor,padding:"18px",fontSize:14,letterSpacing:3,cursor:"pointer",borderRadius:12,fontFamily:"inherit",minHeight:58,transition:"all 0.2s",touchAction:"manipulation",display:"flex",alignItems:"center",justifyContent:"center",gap:10 }}>
+                <span style={{ fontSize:24,animation:isListening?"pulse 0.8s infinite":"none" }}>{isListening?"🎤":"🎙️"}</span>
+                <span>{isListening?"LISTENING... TAP TO STOP":"TAP TO SPEAK ANSWER"}</span>
+              </button>
+              {voiceTranscript&&<div style={{ textAlign:"center",marginTop:8,fontSize:14,color:textColor,fontWeight:"normal",letterSpacing:1 }}>Heard: <strong>"{voiceTranscript}"</strong></div>}
+              {voiceStatus&&<div style={{ textAlign:"center",marginTop:6,fontSize:12,color:textColor,opacity:0.7 }}>{voiceStatus}</div>}
             </div>
           )}
 
@@ -1015,7 +1180,7 @@ export default function MathGame() {
         <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:430,width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
           <div style={{ fontSize:10,color:"#ffcc00",letterSpacing:6,marginBottom:8 }}>LEVEL COMPLETE</div>
           <h2 style={{ fontSize:44,color:textColor,margin:"0 0 6px",textShadow:`0 0 30px ${level.color}` }}>{LEVELS[levelIdx].name}</h2>
-          <div style={{ color:level.color,fontSize:11,letterSpacing:4,marginBottom:20 }}>CLEARED</div>
+          <div style={{ color:level.color,fontSize:14,letterSpacing:4,marginBottom:20 }}>CLEARED</div>
           <div style={{ ...panelStyle,marginBottom:16 }}>
             <div style={{ fontSize:22,color:textColor,letterSpacing:2 }}>{score.toString().padStart(6,"0")}</div>
             <div style={{ color:mutedColor,fontSize:8,letterSpacing:3,marginTop:3 }}>CURRENT SCORE</div>
@@ -1023,10 +1188,10 @@ export default function MathGame() {
           {getWeakTopics().length>0&&(<div style={{ ...panelStyle }}>
             <div style={{ fontSize:8,color:mutedColor,letterSpacing:3,marginBottom:8 }}>WEAK AREAS</div>
             {getWeakTopics().map(w=>(<div key={w.topic} style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
-              <span style={{ fontSize:9,color:mutedColor }}>{w.topic.toUpperCase()}</span><span style={{ fontSize:9,color:w.pct<50?"#ff4466":"#ffcc00" }}>{w.pct}%</span>
+              <span style={{ fontSize:11,color:textColor }}>{w.topic.toUpperCase()}</span><span style={{ fontSize:11,color:w.pct<50?"#ff4466":"#ffcc00" }}>{w.pct}%</span>
             </div>))}
           </div>)}
-          <div style={{ color:mutedColor,fontSize:9,letterSpacing:2,marginBottom:16 }}>NEXT: <span style={{color:LEVELS[levelIdx+1].color}}>{LEVELS[levelIdx+1].name}</span></div>
+          <div style={{ color:mutedColor,fontSize:12,letterSpacing:2,marginBottom:16 }}>NEXT: <span style={{color:LEVELS[levelIdx+1].color}}>{LEVELS[levelIdx+1].name}</span></div>
           <button onClick={nextLevel} style={{ background:"transparent",border:`2px solid ${LEVELS[levelIdx+1].color}`,color:LEVELS[levelIdx+1].color,padding:"18px 36px",fontSize:15,letterSpacing:4,cursor:"pointer",borderRadius:10,fontFamily:"inherit",transition:"all 0.2s",width:"100%",minHeight:58,touchAction:"manipulation" }}
             onMouseEnter={e=>{e.currentTarget.style.background=`${LEVELS[levelIdx+1].color}15`;}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>[ CONTINUE ]</button>
@@ -1038,8 +1203,8 @@ export default function MathGame() {
         <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:430,width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
           <div style={{ fontSize:10,letterSpacing:6,color:"#00ff88",marginBottom:8 }}>SESSION COMPLETE</div>
           <h2 style={{ fontSize:"clamp(26px,6vw,48px)",color:textColor,margin:"0 0 6px",textShadow:"0 0 30px #00ff8888" }}>{lives<=0?"GAME OVER":"MASTERED!"}</h2>
-          <div style={{ color:diff.color,fontSize:9,letterSpacing:4,marginBottom:4 }}>{diff.label} · {xpRank.name}</div>
-          <div style={{ color:"#ffcc00",fontSize:9,letterSpacing:2,marginBottom:16 }}>🔥 DAILY STREAK: {dailyStreak.count} DAYS</div>
+          <div style={{ color:diff.color,fontSize:12,letterSpacing:4,marginBottom:4 }}>{diff.label} · {xpRank.name}</div>
+          <div style={{ color:"#ffcc00",fontSize:12,letterSpacing:2,marginBottom:16 }}>🔥 DAILY STREAK: {dailyStreak.count} DAYS</div>
 
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
             {[
@@ -1055,7 +1220,7 @@ export default function MathGame() {
 
           {/* XP gained */}
           <div style={{ ...panelStyle }}>
-            <div style={{ fontSize:9,color:xpRank.color,letterSpacing:3,marginBottom:6 }}>{xpRank.name} · {xp} XP</div>
+            <div style={{ fontSize:13,color:xpRank.color,letterSpacing:3,marginBottom:6 }}>{xpRank.name} · {xp} XP</div>
             <div style={{ height:4,background:borderColor,borderRadius:2,overflow:"hidden" }}>
               <div style={{ height:"100%",width:`${xpPct(xp)}%`,background:xpRank.color,transition:"width 0.8s" }} />
             </div>
@@ -1064,9 +1229,9 @@ export default function MathGame() {
 
           {/* Weak areas */}
           {weakTopics.length>0&&(<div style={{ ...panelStyle,border:`1px solid #ff446633` }}>
-            <div style={{ fontSize:8,color:"#ff4466",letterSpacing:3,marginBottom:8 }}>⚠ FOCUS AREAS</div>
+            <div style={{ fontSize:12,color:"#ff4466",letterSpacing:3,marginBottom:8 }}>⚠ FOCUS AREAS</div>
             {weakTopics.map(w=>(<div key={w.topic} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-              <span style={{ fontSize:10,color:mutedColor,letterSpacing:1,textTransform:"uppercase" }}>{w.topic}</span>
+              <span style={{ fontSize:12,color:textColor,letterSpacing:1,textTransform:"uppercase" }}>{w.topic}</span>
               <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                 <div style={{ width:70,height:4,background:borderColor,borderRadius:2,overflow:"hidden" }}>
                   <div style={{ height:"100%",width:`${w.pct}%`,background:w.pct<50?"#ff4466":"#ffcc00",borderRadius:2 }} />
@@ -1078,9 +1243,9 @@ export default function MathGame() {
 
           {/* Session log */}
           <div style={{ ...panelStyle,textAlign:"left",maxHeight:160,overflowY:"auto" }}>
-            <div style={{ fontSize:8,color:mutedColor,letterSpacing:3,marginBottom:8 }}>QUESTION LOG</div>
+            <div style={{ fontSize:11,color:mutedColor,letterSpacing:3,marginBottom:8 }}>QUESTION LOG</div>
             {sessionHistory.map((h,i)=>(<div key={i} style={{ display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:9 }}>
-              <span style={{ color:"#5a7080",fontFamily:"monospace" }}>{h.question}</span>
+              <span style={{ color:textColor,fontFamily:"monospace" }}>{h.question}</span>
               <div style={{ display:"flex",gap:8 }}>
                 <span style={{ color:mutedColor }}>{h.elapsed}s</span>
                 <span style={{ color:h.correct?"#00ff88":"#ff4466" }}>{h.correct?"✓":"✗"}</span>
