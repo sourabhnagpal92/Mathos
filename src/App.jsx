@@ -167,9 +167,8 @@ const INPUT_MODES = [
   { key:"type",   label:"TYPE ANSWER",     desc:"Best for real skill building" },
   { key:"speed",  label:"SPEED ROUND",     desc:"Score by how fast you answer" },
   { key:"drill",  label:"TOPIC DRILL",     desc:"Target one weakness" },
-  { key:"race",   label:"RACE MODE",       desc:"2 players, same screen" },
+  { key:"review", label:"❌ WRONG ANSWERS", desc:"Retry every question you got wrong" },
   { key:"audio",  label:"🎧 AUDIO ROUND",   desc:"Questions spoken aloud only" },
-  { key:"sudoku", label:"SUDOKU",          desc:"Logic puzzle mode" },
 ];
 const DRILL_TOPICS = ["addition","subtraction","multiplication","division","algebra","percentages","powers","roots","averages","estimation","expressions"];
 const TOTAL_TIME = 20;
@@ -302,6 +301,7 @@ export default function MathGame() {
   const isSpeed = inputMode==="speed";
   const isType = inputMode==="type";
   const isRace = inputMode==="race";
+  const isReview = inputMode==="review";
   const isAudio = inputMode==="audio" || audioMode;
   const bg = theme==="dark" ? "#050a0f" : "#f0f4f8";
   const cardBg = theme==="dark" ? "#0a1520" : "#ffffff";
@@ -321,6 +321,12 @@ export default function MathGame() {
   }, [difficulty,adaptiveLevel]);
 
   const makeQuestion = useCallback((lvlIdx2) => {
+    // Review mode: serve from missedQuestions pool
+    if (isReview) {
+      if (missedQuestions.length === 0) return null;
+      const idx = rand(0, missedQuestions.length - 1);
+      return { ...missedQuestions[idx] };
+    }
     // Spaced repetition: 25% chance to revisit missed question
     if (spacedQueue.length>0 && Math.random()<0.25) {
       const q = spacedQueue.shift();
@@ -338,7 +344,7 @@ export default function MathGame() {
     }
     if (Math.random()<0.12) return generateEstimation(eff);
     return LEVELS[Math.min(lvlIdx2,LEVELS.length-1)].gen(eff);
-  }, [getEffDiff,isDrill,drillTopics]);
+  }, [getEffDiff,isDrill,drillTopics,isReview]);
 
   const loadQuestion = useCallback((lvlIdx2=levelIdx) => {
     const q = makeQuestion(lvlIdx2);
@@ -440,6 +446,10 @@ export default function MathGame() {
   }
 
   function handleStart() {
+    if (isReview && missedQuestions.length === 0) {
+      setInputError("No wrong answers yet! Play other modes first to build your review list.");
+      return;
+    }
     setInputError("");
     setLives(3); setAdaptiveLevel(0); setConsCorrect(0); setConsWrong(0);
     setScore(0); setStreak(0); setMaxStreak(0); setTotalCorrect(0); setTotalAnswered(0);
@@ -512,6 +522,10 @@ export default function MathGame() {
         return ns;
       });
       setTotalCorrect(t=>t+1);
+      // In review mode, remove from missed pool when answered correctly
+      if (isReview) {
+        missedQuestions = missedQuestions.filter(q=>q.question!==current.question);
+      }
       setConsCorrect(c=>{ const nc=c+1; if(nc>=3){setAdaptiveLevel(l=>Math.min(1,l+1));return 0;} return nc; });
       setConsWrong(0);
       snd("correct");
@@ -520,6 +534,10 @@ export default function MathGame() {
       setStreak(0);
       // Add to spaced repetition queue
       if (!isTimeout) spacedQueue.push(current);
+      // Add to persistent wrong answers pool (avoid duplicates by question text)
+      if (!missedQuestions.find(q=>q.question===current.question)) {
+        missedQuestions.push({...current});
+      }
       setConsWrong(w=>{ const nw=w+1; if(nw>=2){setAdaptiveLevel(l=>Math.max(-1,l-1));return 0;} return nw; });
       setConsCorrect(0);
       snd("wrong");
@@ -529,7 +547,12 @@ export default function MathGame() {
     const delay = correct ? 900 : null;
     if (correct) {
       setTimeout(()=>{
-        const newLives = lives;
+        // Review mode: end when pool is empty, else keep going
+        if (isReview) {
+          const remaining = missedQuestions.filter(q=>q.question!==current.question);
+          if (remaining.length === 0) { setWeakTopics(getWeakTopics()); setScreen("win"); return; }
+          setQIdx(q=>q+1); loadQuestion(levelIdx); return;
+        }
         const next=qIdx+1;
         if (!isDrill&&next>=questionsPerLevel) {
           if (levelIdx+1>=LEVELS.length) { setWeakTopics(getWeakTopics()); setScreen("win"); }
@@ -544,8 +567,12 @@ export default function MathGame() {
 
   function advanceQuestion() {
     if (feedback === "correct" || feedback === null) return;
-    const newLives = lives; // already decremented in handleAnswer
-    if (newLives <= 0) { setWeakTopics(getWeakTopics()); setScreen("win"); return; }
+    const newLives = lives;
+    if (!isReview && newLives <= 0) { setWeakTopics(getWeakTopics()); setScreen("win"); return; }
+    if (isReview) {
+      if (missedQuestions.length === 0) { setWeakTopics(getWeakTopics()); setScreen("win"); return; }
+      setQIdx(q=>q+1); loadQuestion(levelIdx); return;
+    }
     const next = qIdx + 1;
     if (!isDrill && next >= questionsPerLevel) {
       if (levelIdx + 1 >= LEVELS.length) { setWeakTopics(getWeakTopics()); setScreen("win"); }
@@ -701,18 +728,18 @@ export default function MathGame() {
           </div>
         </div>
 
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:24 }}>
-          <button onClick={()=>{setAppMode("math");setScreen("intro");}} style={{ background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"28px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00ff8844", transition:"all 0.2s", minHeight:120 }}
+        <div style={{ display:"flex", flexDirection:"column", gap:14, marginBottom:24 }}>
+          <button onClick={()=>{setAppMode("math");setScreen("intro");}} style={{ background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"28px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00ff8844", transition:"all 0.2s", minHeight:100 }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00ff8818";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <div style={{ fontSize:36, marginBottom:10 }}>🧮</div>
+            <div style={{ fontSize:36, marginBottom:8 }}>🧮</div>
             <div>MATH TRAINING</div>
-            <div style={{ fontSize:11, color:"#00ff8899", marginTop:4, letterSpacing:1 }}>Arithmetic · Algebra · Advanced</div>
+            <div style={{ fontSize:11, color:"#00ff8899", marginTop:4, letterSpacing:1 }}>Arithmetic · Algebra · Advanced · Audio · Drill · Review</div>
           </button>
-          <button onClick={()=>startSudoku()} style={{ background:"transparent", border:"2px solid #00cfff", color:"#00cfff", padding:"28px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00cfff44", transition:"all 0.2s", minHeight:120 }}
+          <button onClick={()=>startSudoku()} style={{ background:"transparent", border:"2px solid #00cfff", color:"#00cfff", padding:"24px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00cfff44", transition:"all 0.2s", minHeight:90 }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00cfff18";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <div style={{ fontSize:36, marginBottom:10 }}>🔢</div>
+            <div style={{ fontSize:32, marginBottom:8 }}>🔢</div>
             <div>SUDOKU</div>
             <div style={{ fontSize:11, color:"#00cfff99", marginTop:4, letterSpacing:1 }}>Logic · Pattern · Deduction</div>
           </button>
@@ -963,10 +990,10 @@ export default function MathGame() {
           {/* Questions + Stats */}
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}>
             <div style={{ ...panelStyle,marginBottom:0 }}>
-              <div style={{ fontSize:12,color:"#fff",letterSpacing:3,marginBottom:8 }}>QUESTIONS / LEVEL</div>
+              <div style={{ fontSize:12,color:"#fff",letterSpacing:3,marginBottom:8 }}>NO. OF QUESTIONS / ROUND</div>
               <select value={questionsPerLevel} onChange={e=>setQuestionsPerLevel(Number(e.target.value))}
                 style={{ background:bg,border:`1px solid ${borderColor}`,color:"#fff",padding:"14px",fontSize:18,letterSpacing:2,borderRadius:8,fontFamily:"inherit",width:"100%",boxSizing:"border-box",outline:"none",textAlign:"center",minHeight:52,cursor:"pointer",WebkitAppearance:"none",appearance:"none" }}>
-                {[5,10,15,20,25,30,35,40,45,50].map(n=><option key={n} value={n}>{n} questions</option>)}
+                {[5,10,15,20,25,30,35,40,45,50].map(n=><option key={n} value={n}>{n}</option>)}
               </select>
             </div>
             <div style={{ ...panelStyle,marginBottom:0 }}>
@@ -978,6 +1005,17 @@ export default function MathGame() {
               </div>
             </div>
           </div>
+
+          {/* Review mode info */}
+          {inputMode==="review"&&(
+            <div style={{ ...panelStyle, border:`1px solid #ff446644`, background:"#ff446608" }}>
+              <div style={{ fontSize:12,color:"#ff4466",letterSpacing:3,marginBottom:6 }}>❌ WRONG ANSWERS POOL</div>
+              <div style={{ fontSize:14,color:"#fff",fontWeight:"bold" }}>{missedQuestions.length} question{missedQuestions.length!==1?"s":""} to review</div>
+              <div style={{ fontSize:11,color:mutedColor,marginTop:4 }}>
+                {missedQuestions.length===0?"Play other modes to populate your review list.":"Questions you answered wrong, removed as you get them right."}
+              </div>
+            </div>
+          )}
 
           {getWeakTopics().length>0&&(
             <div style={{ ...panelStyle }}>
@@ -993,59 +1031,6 @@ export default function MathGame() {
           <button onClick={handleStart} style={{ background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"18px 48px",fontSize:16,letterSpacing:5,cursor:"pointer",borderRadius:8,fontFamily:"inherit",boxShadow:"0 0 20px #00ff8844",transition:"all 0.2s",width:"100%",minHeight:58,touchAction:"manipulation" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00ff8818";e.currentTarget.style.boxShadow="0 0 32px #00ff8877";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.boxShadow="0 0 20px #00ff8844";}}>[ INITIALIZE ]</button>
-        </div>
-      )}
-
-      {/* ── RACE MODE ── */}
-      {screen==="race"&&raceCurrent&&(
-        <div style={{ width:"100%",maxWidth:430,animation:"fadeIn 0.3s ease", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),24px)" }}>
-          <div style={{ textAlign:"center",marginBottom:20 }}>
-            <div style={{ fontSize:13,color:mutedColor,letterSpacing:4 }}>RACE MODE · ROUND {raceRound+1}/{RACE_ROUNDS}</div>
-            <div style={{ display:"flex",justifyContent:"center",gap:40,marginTop:10 }}>
-              <div style={{ textAlign:"center" }}><div style={{ fontSize:13,color:mutedColor }}>PLAYER 1</div><div style={{ fontSize:36,color:"#00ff88" }}>{raceScores[0]}</div></div>
-              <div style={{ fontSize:20,color:mutedColor,alignSelf:"center" }}>VS</div>
-              <div style={{ textAlign:"center" }}><div style={{ fontSize:13,color:mutedColor }}>PLAYER 2</div><div style={{ fontSize:36,color:"#00cfff" }}>{raceScores[1]}</div></div>
-            </div>
-          </div>
-
-          <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"28px 24px",marginBottom:20,textAlign:"center" }}>
-            <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:10 }}>{raceCurrent.hint.toUpperCase()}</div>
-            <div style={{ fontSize:"clamp(24px,6vw,48px)",color:textColor,letterSpacing:4 }}>{raceCurrent.question}</div>
-          </div>
-
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:20 }}>
-            {[0,1].map(p=>(
-              <div key={p} style={{ background:cardBg,border:`2px solid ${p===0?"#00ff88":"#00cfff"}`,borderRadius:10,padding:"16px" }}>
-                <div style={{ fontSize:10,color:p===0?"#00ff88":"#00cfff",letterSpacing:3,marginBottom:10,textAlign:"center" }}>PLAYER {p+1}</div>
-                <input ref={raceInputRefs[p]} type="number" placeholder="Answer..." value={raceInput[p]}
-                  onChange={e=>handleRaceInput(p,e.target.value)}
-                  onKeyDown={e=>{if(e.key==="Enter")handleRaceSubmit(p);}}
-                  disabled={!!raceFeedback[p]}
-                  style={{ width:"100%",boxSizing:"border-box",background:bg,border:`1px solid ${raceFeedback[p]==="correct"?"#00ff88":raceFeedback[p]==="wrong"?"#ff4466":borderColor}`,color:textColor,padding:"16px",fontSize:22,letterSpacing:2,borderRadius:10,fontFamily:"inherit",outline:"none",textAlign:"center",minHeight:56 }} />
-                <button onClick={()=>handleRaceSubmit(p)} disabled={!!raceFeedback[p]} style={{ width:"100%",marginTop:10,background:p===0?"#00ff8815":"#00cfff15",border:`1px solid ${p===0?"#00ff88":"#00cfff"}`,color:p===0?"#00ff88":"#00cfff",padding:"16px",fontSize:14,letterSpacing:3,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:52,touchAction:"manipulation" }}>SUBMIT</button>
-                {raceFeedback[p]&&<div style={{ textAlign:"center",marginTop:8,fontSize:12,color:raceFeedback[p]==="correct"?"#00ff88":"#ff4466" }}>{raceFeedback[p]==="correct"?"✓ CORRECT!":"✗ WRONG"}</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── RACE WIN ── */}
-      {screen==="racewin"&&(
-        <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:430,width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
-          <div style={{ fontSize:36,marginBottom:16 }}>🏆</div>
-          <div style={{ fontSize:10,color:"#ffcc00",letterSpacing:6,marginBottom:10 }}>RACE COMPLETE</div>
-          <h2 style={{ fontSize:40,color:textColor,margin:"0 0 24px" }}>{raceWinner===-1?"DRAW!":raceWinner===0?"P1 WINS!":"P2 WINS!"}</h2>
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:28 }}>
-            {[0,1].map(p=>(<div key={p} style={{ background:cardBg,border:`1px solid ${p===0?"#00ff88":"#00cfff"}`,borderRadius:8,padding:"16px" }}>
-              <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:6 }}>PLAYER {p+1}</div>
-              <div style={{ fontSize:32,color:p===0?"#00ff88":"#00cfff" }}>{raceScores[p]}</div>
-            </div>))}
-          </div>
-          <div style={{ display:"flex",gap:10,justifyContent:"center" }}>
-            <button onClick={()=>{setRaceScores([0,0]);setRaceRound(0);setRaceWinner(null);setRaceCurrent(null);setScreen("race");}} style={{ background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"12px 28px",fontSize:11,letterSpacing:4,cursor:"pointer",borderRadius:4,fontFamily:"inherit" }}>REMATCH</button>
-            <button onClick={restart} style={{ background:"transparent",border:`1px solid ${borderColor}`,color:mutedColor,padding:"12px 28px",fontSize:11,letterSpacing:4,cursor:"pointer",borderRadius:4,fontFamily:"inherit" }}>MENU</button>
-          </div>
         </div>
       )}
 
@@ -1080,7 +1065,7 @@ export default function MathGame() {
           <div style={{ display:"flex",gap:6,justifyContent:"center",marginBottom:10,flexWrap:"wrap" }}>
             <div style={{ background:`${diff.color}12`,border:`1px solid ${diff.color}44`,borderRadius:20,padding:"2px 10px",fontSize:8,letterSpacing:2,color:diff.color }}>{diff.label}</div>
             <div style={{ background:"transparent",border:`1px solid ${adaptiveColor}44`,borderRadius:20,padding:"2px 10px",fontSize:8,letterSpacing:2,color:adaptiveColor }}>{adaptiveLabel}</div>
-            <div style={{ background:"transparent",border:`1px solid ${borderColor}`,borderRadius:20,padding:"2px 10px",fontSize:8,letterSpacing:2,color:mutedColor }}>Q{qIdx+1}/{isDrill?questionsPerLevel*3:questionsPerLevel}</div>
+            <div style={{ background:"transparent",border:`1px solid ${borderColor}`,borderRadius:20,padding:"2px 10px",fontSize:8,letterSpacing:2,color:mutedColor }}>{isReview?`❌ ${missedQuestions.length} left`:`Q${qIdx+1}/${isDrill?questionsPerLevel*3:questionsPerLevel}`}</div>
             {streak>0&&<div style={{ background:"#ffcc0012",border:"1px solid #ffcc0044",borderRadius:20,padding:"2px 10px",fontSize:8,letterSpacing:2,color:"#ffcc00" }}>{streak>=3?"🔥 ":""}×{streak}</div>}
           </div>
 
@@ -1109,7 +1094,7 @@ export default function MathGame() {
 
           {/* Question */}
           <div style={{ background:cardBg,border:`1px solid ${level.color}44`,borderRadius:10,padding:"26px 22px",marginBottom:14,textAlign:"center",animation:feedback==="wrong"?"shake 0.4s ease":"none",boxShadow:`0 0 30px ${level.color}08` }}>
-            <div style={{ fontSize:12,color:mutedColor,letterSpacing:3,marginBottom:12 }}>{current.hint.toUpperCase()}</div>
+            {!isAudio&&<div style={{ fontSize:12,color:mutedColor,letterSpacing:3,marginBottom:12 }}>{current.hint.toUpperCase()}</div>}
             {isAudio ? (
               <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:20,padding:"12px 0" }}>
                 <div style={{ fontSize:72,lineHeight:1 }}>{isSpeaking?"🔊":"👂"}</div>
@@ -1122,13 +1107,13 @@ export default function MathGame() {
             ) : (
               <>
                 <div style={{ fontSize:"clamp(32px,8vw,56px)",color:textColor,letterSpacing:3,textShadow:`0 0 20px ${level.color}55` }}>{current.question}</div>
-                {showHint&&current.steps&&<div style={{ marginTop:12,fontSize:10,color:mutedColor,borderTop:`1px solid ${borderColor}`,paddingTop:10 }}>💡 {current.steps[0]}</div>}
+                {showHint&&current.steps&&!isAudio&&<div style={{ marginTop:12,fontSize:10,color:mutedColor,borderTop:`1px solid ${borderColor}`,paddingTop:10 }}>💡 {current.steps[0]}</div>}
               </>
             )}
           </div>
 
           {/* Solution on wrong */}
-          {feedback&&feedback!=="correct"&&(
+          {feedback&&feedback!=="correct"&&!isAudio&&(
             <div style={{ background:bg,border:`1px solid ${borderColor}`,borderRadius:8,padding:"12px 16px",marginBottom:12,animation:"fadeInFast 0.3s ease" }}>
               <div style={{ fontSize:8,color:mutedColor,letterSpacing:3,marginBottom:6 }}>SOLUTION</div>
               {current.steps.map((s,i)=>(<div key={i} style={{ fontSize:10,color:i===current.steps.length-1?"#00ff88":"#fff",marginBottom:2 }}>{i===current.steps.length-1?"→ ":"  "}{s}</div>))}
@@ -1149,8 +1134,8 @@ export default function MathGame() {
             </div>
           )}
 
-          {/* On-screen numeric keypad for type/speed mode */}
-          {(isType||isSpeed)&&!current.isEstimation&&!isAudio&&(
+          {/* On-screen numeric keypad for type/speed/drill/review mode */}
+          {(isType||isSpeed||isDrill||isReview)&&!current.isEstimation&&!isAudio&&(
             <div style={{ marginBottom:12 }}>
               {/* Display */}
               <div style={{ background:cardBg,border:`1px solid ${feedback==="correct"?level.color:feedback?"#ff4466":borderColor}`,borderRadius:12,padding:"16px 20px",marginBottom:10,textAlign:"center",minHeight:58,display:"flex",alignItems:"center",justifyContent:"center" }}>
@@ -1252,7 +1237,7 @@ export default function MathGame() {
       {screen==="win"&&(
         <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:430,width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
           <div style={{ fontSize:10,letterSpacing:6,color:"#00ff88",marginBottom:8 }}>SESSION COMPLETE</div>
-          <h2 style={{ fontSize:"clamp(26px,6vw,48px)",color:textColor,margin:"0 0 6px",textShadow:"0 0 30px #00ff8888" }}>{lives<=0?"GAME OVER":"MASTERED!"}</h2>
+          <h2 style={{ fontSize:"clamp(26px,6vw,48px)",color:textColor,margin:"0 0 6px",textShadow:"0 0 30px #00ff8888" }}>{isReview?"REVIEW DONE!":lives<=0?"GAME OVER":"MASTERED!"}</h2>
           <div style={{ color:diff.color,fontSize:12,letterSpacing:4,marginBottom:4 }}>{diff.label} · {xpRank.name}</div>
           <div style={{ color:"#ffcc00",fontSize:12,letterSpacing:2,marginBottom:16 }}>🔥 DAILY STREAK: {dailyStreak.count} DAYS</div>
 
