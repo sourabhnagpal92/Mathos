@@ -225,9 +225,9 @@ export default function MathGame() {
   const [screen, setScreen] = useState("intro");
   const [difficulty, setDifficulty] = useState("medium");
   const [inputMode, setInputMode] = useState("mcq");
-  const [drillTopic, setDrillTopic] = useState("multiplication");
+  const [drillTopics, setDrillTopics] = useState(new Set(["multiplication"]));
+  const drillTopic = [...drillTopics][0] || "multiplication"; // compat alias
   const [questionsPerLevel, setQuestionsPerLevel] = useState(5);
-  const [inputVal, setInputVal] = useState("5");
   const [inputError, setInputError] = useState("");
   const [soundOn, setSoundOn] = useState(true);
   const [theme, setTheme] = useState("dark");
@@ -269,6 +269,7 @@ export default function MathGame() {
   const [voiceTranscript, setVoiceTranscript] = useState(""); // what mic heard
   const [voiceStatus, setVoiceStatus] = useState("");        // status message
   const recognitionRef = useRef(null);
+  const [keypadInput, setKeypadInput] = useState("");
 
   // ── Race mode ──
   const [raceScores, setRaceScores] = useState([0,0]);
@@ -327,15 +328,17 @@ export default function MathGame() {
     }
     const eff = getEffDiff();
     if (isDrill) {
-      if (drillTopic==="estimation") return generateEstimation(eff);
+      const topics = [...drillTopics];
+      const pick = topics[rand(0, topics.length-1)];
+      if (pick==="estimation") return generateEstimation(eff);
       for (const gen of [generateBasic,generateAlgebra,generateAdvanced]) {
-        for (let i=0;i<12;i++) { const q=gen(eff); if (q.topic===drillTopic) return q; }
+        for (let i=0;i<12;i++) { const q=gen(eff); if (q.topic===pick) return q; }
       }
       return generateBasic(eff);
     }
     if (Math.random()<0.12) return generateEstimation(eff);
     return LEVELS[Math.min(lvlIdx2,LEVELS.length-1)].gen(eff);
-  }, [getEffDiff,isDrill,drillTopic]);
+  }, [getEffDiff,isDrill,drillTopics]);
 
   const loadQuestion = useCallback((lvlIdx2=levelIdx) => {
     const q = makeQuestion(lvlIdx2);
@@ -365,46 +368,69 @@ export default function MathGame() {
   }
 
   // ── Start voice recognition for answer ──
+  function parseSpokenNumber(t) {
+    // Try direct digits first
+    const digits = t.replace(/[^0-9]/g,"");
+    if (digits.length > 0) return parseInt(digits, 10);
+    // Word to number
+    const words = {"zero":0,"oh":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,"nineteen":19,"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90,"hundred":100,"thousand":1000};
+    const lower = t.toLowerCase().replace(/[^a-z\s]/g,"");
+    const parts = lower.trim().split(/\s+/);
+    let total = 0, curr = 0;
+    for (const w of parts) {
+      if (words[w] === undefined) continue;
+      const v = words[w];
+      if (v === 1000) { total += (curr||1)*1000; curr = 0; }
+      else if (v === 100) { curr = (curr||1)*100; }
+      else if (v >= 20) curr += v;
+      else curr += v;
+    }
+    total += curr;
+    return total > 0 ? total : NaN;
+  }
+
   function startVoiceAnswer() {
     const SR = getSpeechRecognition();
-    if (!SR) { setVoiceStatus("Speech recognition not supported on this browser."); return; }
-    if (isListening) { recognitionRef.current?.stop(); return; }
-    const r = new SR();
-    recognitionRef.current = r;
-    r.continuous = false;
-    r.interimResults = true;
-    r.lang = "en-US";
-    r.onstart = () => { setIsListening(true); setVoiceStatus("🎤 Listening..."); setVoiceTranscript(""); };
-    r.onresult = (e) => {
-      const t = Array.from(e.results).map(r=>r[0].transcript).join("").trim();
-      setVoiceTranscript(t);
-      if (e.results[e.results.length-1].isFinal) {
-        setIsListening(false);
-        setVoiceStatus("");
-        // Extract number from transcript
-        const words = { "zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,"nineteen":19,"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90,"hundred":100 };
-        let num = parseInt(t.replace(/[^0-9]/g,""), 10);
-        if (isNaN(num)) {
-          // Try word-to-number
-          const lower = t.toLowerCase();
-          let total = 0, curr = 0;
-          lower.split(/\s+/).forEach(w => {
-            if (words[w] !== undefined) {
-              if (words[w] === 100) { curr = (curr||1)*100; }
-              else if (words[w] >= 20) curr += words[w];
-              else curr += words[w];
-            }
-          });
-          total += curr;
-          if (total > 0) num = total;
+    if (!SR) { setVoiceStatus("❌ Speech recognition not supported. Use Safari on iPhone or Chrome on desktop."); return; }
+    if (feedback !== null) return;
+    if (isListening) { recognitionRef.current?.abort?.() || recognitionRef.current?.stop(); setIsListening(false); setVoiceStatus(""); return; }
+    try {
+      const r = new SR();
+      recognitionRef.current = r;
+      r.continuous = false;
+      r.interimResults = true;
+      r.lang = "en-US";
+      r.maxAlternatives = 3;
+      r.onstart = () => { setIsListening(true); setVoiceStatus("🎤 Listening — say your answer..."); setVoiceTranscript(""); };
+      r.onresult = (e) => {
+        // Try all alternatives for best number parse
+        let bestNum = NaN;
+        let bestTranscript = "";
+        for (let ri = 0; ri < e.results.length; ri++) {
+          for (let ai = 0; ai < e.results[ri].length; ai++) {
+            const t = e.results[ri][ai].transcript.trim();
+            const n = parseSpokenNumber(t);
+            if (!isNaN(n)) { bestNum = n; bestTranscript = t; break; }
+            if (!bestTranscript) bestTranscript = t;
+          }
+          if (!isNaN(bestNum)) break;
         }
-        if (!isNaN(num)) handleAnswer(null, num);
-        else setVoiceStatus(`Heard: "${t}" — couldn't parse a number. Try again.`);
-      }
-    };
-    r.onerror = (e) => { setIsListening(false); setVoiceStatus(e.error==="no-speech"?"No speech detected. Tap mic to retry.":`Error: ${e.error}`); };
-    r.onend = () => { setIsListening(false); };
-    r.start();
+        setVoiceTranscript(bestTranscript);
+        if (e.results[e.results.length-1].isFinal) {
+          setIsListening(false); setVoiceStatus("");
+          if (!isNaN(bestNum)) { handleAnswer(null, bestNum); }
+          else setVoiceStatus(`Heard: "${bestTranscript}" — say a number clearly and try again.`);
+        }
+      };
+      r.onerror = (ev) => {
+        setIsListening(false);
+        if (ev.error === "no-speech") setVoiceStatus("No speech detected — tap mic and try again.");
+        else if (ev.error === "not-allowed") setVoiceStatus("❌ Microphone permission denied. Allow mic access in browser settings.");
+        else setVoiceStatus(`Mic error: ${ev.error}. Tap mic to retry.`);
+      };
+      r.onend = () => setIsListening(false);
+      r.start();
+    } catch(err) { setVoiceStatus("Could not start microphone: " + err.message); }
   }
 
   function stopVoiceAnswer() {
@@ -414,10 +440,7 @@ export default function MathGame() {
   }
 
   function handleStart() {
-    const n=parseInt(inputVal,10);
-    if (!inputVal||isNaN(n)||n<1) { setInputError("Enter 1–25."); return; }
-    if (n>25) { setInputError("Max 25."); return; }
-    setQuestionsPerLevel(n); setInputError("");
+    setInputError("");
     setLives(3); setAdaptiveLevel(0); setConsCorrect(0); setConsWrong(0);
     setScore(0); setStreak(0); setMaxStreak(0); setTotalCorrect(0); setTotalAnswered(0);
     sessionHistory=[];
@@ -557,7 +580,7 @@ export default function MathGame() {
   function restart() {
     setLevelIdx(0);setQIdx(0);setScore(0);setStreak(0);setMaxStreak(0);
     setTotalCorrect(0);setTotalAnswered(0);setLives(3);setAdaptiveLevel(0);
-    setConsCorrect(0);setConsWrong(0);setInputVal(String(questionsPerLevel));
+    setConsCorrect(0);setConsWrong(0);
     setInputError(""); sessionHistory=[];
     setScreen("intro");
   }
@@ -669,8 +692,8 @@ export default function MathGame() {
             <span style={{ fontSize:14, color:xpRank.color, letterSpacing:3 }}>{xpRank.name}</span>
             <span style={{ fontSize:12, color:mutedColor }}>{xp} XP · {xpToNext(xp)} to next</span>
           </div>
-          <div style={{ height:4, background:borderColor, borderRadius:2, overflow:"hidden" }}>
-            <div style={{ height:"100%", width:`${xpPct(xp)}%`, background:xpRank.color, boxShadow:`0 0 8px ${xpRank.color}`, transition:"width 0.5s" }} />
+          <div style={{ height:8, background:"#ff446622", borderRadius:4, overflow:"hidden" }}>
+            <div style={{ height:"100%", width:`${xpPct(xp)}%`, background:xpRank.color, boxShadow:`0 0 8px ${xpRank.color}`, transition:"width 0.5s", borderRadius:4 }} />
           </div>
           <div style={{ display:"flex", justifyContent:"space-between", marginTop:8 }}>
             <span style={{ fontSize:11, color:textColor }}>🔥 {dailyStreak.count} day streak</span>
@@ -915,10 +938,14 @@ export default function MathGame() {
 
           {inputMode==="drill"&&(
             <div style={{ ...panelStyle, animation:"fadeInFast 0.3s ease" }}>
-              <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:8 }}>DRILL TOPIC</div>
-              <div style={{ display:"flex",flexWrap:"wrap",gap:6 }}>
-                {DRILL_TOPICS.map(t=>(<button key={t} onClick={()=>setDrillTopic(t)} style={{ background:drillTopic===t?"#00cfff15":cardBg,border:`1px solid ${drillTopic===t?"#00cfff":borderColor}`,borderRadius:20,padding:"10px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:12,letterSpacing:2,color:drillTopic===t?"#00cfff":mutedColor,transition:"all 0.15s",minHeight:44,touchAction:"manipulation" }}>{t.toUpperCase()}</button>))}
+              <div style={{ fontSize:12,color:"#fff",letterSpacing:3,marginBottom:4 }}>DRILL TOPICS <span style={{color:mutedColor,fontSize:10}}>· tap to toggle, select multiple</span></div>
+              <div style={{ display:"flex",flexWrap:"wrap",gap:8,marginTop:8 }}>
+                {DRILL_TOPICS.map(t=>{
+                  const sel=drillTopics.has(t);
+                  return (<button key={t} onClick={()=>setDrillTopics(prev=>{const n=new Set(prev);if(sel&&n.size>1)n.delete(t);else n.add(t);return n;})} style={{ background:sel?"#00cfff18":cardBg,border:`2px solid ${sel?"#00cfff":borderColor}`,borderRadius:20,padding:"10px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:12,letterSpacing:2,color:sel?"#00cfff":"#fff",transition:"all 0.15s",minHeight:44,touchAction:"manipulation",fontWeight:sel?"bold":"normal" }}>{sel?"✓ ":""}{t.toUpperCase()}</button>);
+                })}
               </div>
+              <div style={{fontSize:10,color:mutedColor,marginTop:8}}>{drillTopics.size} topic{drillTopics.size!==1?"s":""} selected</div>
             </div>
           )}
 
@@ -936,10 +963,11 @@ export default function MathGame() {
           {/* Questions + Stats */}
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}>
             <div style={{ ...panelStyle,marginBottom:0 }}>
-              <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:8 }}>QUESTIONS/LEVEL</div>
-              <input type="number" min="1" max="25" value={inputVal} onChange={e=>{setInputVal(e.target.value);setInputError("");}} onKeyDown={e=>{if(e.key==="Enter")handleStart();}}
-                style={{ background:bg,border:`1px solid ${inputError?"#ff4466":borderColor}`,color:textColor,padding:"14px",fontSize:20,letterSpacing:2,borderRadius:8,fontFamily:"inherit",width:"100%",boxSizing:"border-box",outline:"none",textAlign:"center",minHeight:52 }} />
-              {inputError&&<div style={{ color:"#ff4466",fontSize:9,marginTop:5 }}>⚠ {inputError}</div>}
+              <div style={{ fontSize:12,color:"#fff",letterSpacing:3,marginBottom:8 }}>QUESTIONS / LEVEL</div>
+              <select value={questionsPerLevel} onChange={e=>setQuestionsPerLevel(Number(e.target.value))}
+                style={{ background:bg,border:`1px solid ${borderColor}`,color:"#fff",padding:"14px",fontSize:18,letterSpacing:2,borderRadius:8,fontFamily:"inherit",width:"100%",boxSizing:"border-box",outline:"none",textAlign:"center",minHeight:52,cursor:"pointer",WebkitAppearance:"none",appearance:"none" }}>
+                {[5,10,15,20,25,30,35,40,45,50].map(n=><option key={n} value={n}>{n} questions</option>)}
+              </select>
             </div>
             <div style={{ ...panelStyle,marginBottom:0 }}>
               <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:8 }}>POWERUPS</div>
@@ -1057,8 +1085,8 @@ export default function MathGame() {
           </div>
 
           {/* XP bar mini */}
-          <div style={{ height:2,background:borderColor,borderRadius:2,marginBottom:10,overflow:"hidden" }}>
-            <div style={{ height:"100%",background:xpRank.color,width:`${xpPct(xp)}%`,transition:"width 0.5s" }} />
+          <div style={{ height:5,background:"#ff446618",borderRadius:3,marginBottom:10,overflow:"hidden" }}>
+            <div style={{ height:"100%",background:xpRank.color,width:`${xpPct(xp)}%`,transition:"width 0.5s",borderRadius:3 }} />
           </div>
 
           {/* Progress */}
@@ -1082,17 +1110,18 @@ export default function MathGame() {
           {/* Question */}
           <div style={{ background:cardBg,border:`1px solid ${level.color}44`,borderRadius:10,padding:"26px 22px",marginBottom:14,textAlign:"center",animation:feedback==="wrong"?"shake 0.4s ease":"none",boxShadow:`0 0 30px ${level.color}08` }}>
             <div style={{ fontSize:12,color:mutedColor,letterSpacing:3,marginBottom:12 }}>{current.hint.toUpperCase()}</div>
-            {isAudio && !feedback ? (
-              <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:16 }}>
-                <div style={{ fontSize:52 }}>{isSpeaking?"🔊":"👂"}</div>
-                <div style={{ fontSize:13,color:isSpeaking?level.color:mutedColor,letterSpacing:3,animation:isSpeaking?"pulse 1s infinite":"none" }}>
-                  {isSpeaking?"SPEAKING...":"QUESTION READY"}
+            {isAudio ? (
+              <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:20,padding:"12px 0" }}>
+                <div style={{ fontSize:72,lineHeight:1 }}>{isSpeaking?"🔊":"👂"}</div>
+                <div style={{ fontSize:14,color:isSpeaking?level.color:"#fff",letterSpacing:3,animation:isSpeaking?"pulse 1s infinite":"none",textAlign:"center" }}>
+                  {isSpeaking?"SPEAKING QUESTION...":feedback?"ANSWER SUBMITTED":"LISTEN CAREFULLY"}
                 </div>
-                <button onClick={()=>speakQuestion(current)} style={{ background:`${level.color}18`,border:`1px solid ${level.color}`,color:level.color,padding:"12px 24px",fontSize:12,letterSpacing:3,cursor:"pointer",borderRadius:20,fontFamily:"inherit",minHeight:44,touchAction:"manipulation" }}>🔁 REPEAT</button>
+                {!feedback&&<button onClick={()=>speakQuestion(current)} style={{ background:`${level.color}18`,border:`2px solid ${level.color}`,color:level.color,padding:"14px 28px",fontSize:14,letterSpacing:3,cursor:"pointer",borderRadius:24,fontFamily:"inherit",minHeight:52,touchAction:"manipulation" }}>🔁 REPEAT QUESTION</button>}
+                {feedback&&<div style={{ fontSize:14,color:feedback==="correct"?level.color:"#ff4466",letterSpacing:3 }}>ANSWER WAS: {current.answer}</div>}
               </div>
             ) : (
               <>
-                <div style={{ fontSize:"clamp(32px,8vw,56px)",color:isAudio&&!feedback?"transparent":textColor,letterSpacing:3,textShadow:`0 0 20px ${level.color}55` }}>{current.question}</div>
+                <div style={{ fontSize:"clamp(32px,8vw,56px)",color:textColor,letterSpacing:3,textShadow:`0 0 20px ${level.color}55` }}>{current.question}</div>
                 {showHint&&current.steps&&<div style={{ marginTop:12,fontSize:10,color:mutedColor,borderTop:`1px solid ${borderColor}`,paddingTop:10 }}>💡 {current.steps[0]}</div>}
               </>
             )}
@@ -1102,13 +1131,13 @@ export default function MathGame() {
           {feedback&&feedback!=="correct"&&(
             <div style={{ background:bg,border:`1px solid ${borderColor}`,borderRadius:8,padding:"12px 16px",marginBottom:12,animation:"fadeInFast 0.3s ease" }}>
               <div style={{ fontSize:8,color:mutedColor,letterSpacing:3,marginBottom:6 }}>SOLUTION</div>
-              {current.steps.map((s,i)=>(<div key={i} style={{ fontSize:10,color:i===current.steps.length-1?"#00ff88":textColor,marginBottom:2 }}>{i===current.steps.length-1?"→ ":"  "}{s}</div>))}
+              {current.steps.map((s,i)=>(<div key={i} style={{ fontSize:10,color:i===current.steps.length-1?"#00ff88":"#fff",marginBottom:2 }}>{i===current.steps.length-1?"→ ":"  "}{s}</div>))}
               {current.shortcut&&(<div style={{ marginTop:8,paddingTop:6,borderTop:`1px solid ${borderColor}` }}><span style={{ fontSize:8,color:"#ffcc00",letterSpacing:2 }}>💡 </span><span style={{ fontSize:11,color:"#ffcc00bb" }}>{current.shortcut}</span></div>)}
             </div>
           )}
 
           {/* MCQ */}
-          {(inputMode==="mcq"||current.isEstimation)&&(
+          {(inputMode==="mcq"||inputMode==="audio"||current.isEstimation)&&(
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
               {choices.map((c,i)=>{
                 const isCorrectAns=Number(c)===Number(current.answer);
@@ -1120,12 +1149,33 @@ export default function MathGame() {
             </div>
           )}
 
-          {/* Type input */}
-          {(isType||isSpeed)&&!current.isEstimation&&(
-            <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-              <input ref={typeInputRef} type="number" placeholder="Type answer..." value={typedAnswer} onChange={e=>setTypedAnswer(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")handleTypedSubmit();}} disabled={!!feedback} className="type-input"
-                style={{ flex:1,background:cardBg,border:`1px solid ${feedback==="correct"?level.color:feedback?"#ff4466":borderColor}`,color:textColor,padding:"18px 16px",fontSize:24,letterSpacing:2,borderRadius:12,fontFamily:"inherit",outline:"none",transition:"all 0.2s",minHeight:62 }} />
-              <button onClick={handleTypedSubmit} disabled={!!feedback} style={{ background:feedback?"transparent":"#00ff8815",border:`1px solid ${feedback?borderColor:"#00ff88"}`,color:feedback?mutedColor:"#00ff88",padding:"0 20px",fontSize:14,letterSpacing:3,borderRadius:12,cursor:feedback?"default":"pointer",fontFamily:"inherit",minHeight:62,touchAction:"manipulation" }}>GO</button>
+          {/* On-screen numeric keypad for type/speed mode */}
+          {(isType||isSpeed)&&!current.isEstimation&&!isAudio&&(
+            <div style={{ marginBottom:12 }}>
+              {/* Display */}
+              <div style={{ background:cardBg,border:`1px solid ${feedback==="correct"?level.color:feedback?"#ff4466":borderColor}`,borderRadius:12,padding:"16px 20px",marginBottom:10,textAlign:"center",minHeight:58,display:"flex",alignItems:"center",justifyContent:"center" }}>
+                <span style={{ fontSize:32,color:"#fff",letterSpacing:4,fontWeight:"bold" }}>{typedAnswer||<span style={{color:mutedColor,fontSize:18}}>tap numbers below</span>}</span>
+              </div>
+              {/* Keypad */}
+              {!feedback&&(
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+                  {[1,2,3,4,5,6,7,8,9].map(n=>(
+                    <button key={n} onClick={()=>setTypedAnswer(p=>p+String(n))}
+                      style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#fff",fontSize:26,fontWeight:"bold",padding:"18px 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:64,touchAction:"manipulation",transition:"all 0.1s" }}
+                      onTouchStart={e=>e.currentTarget.style.background=level.color+"33"}
+                      onTouchEnd={e=>e.currentTarget.style.background=cardBg}>
+                      {n}
+                    </button>
+                  ))}
+                  {/* Bottom row: ⌫ — 0 — GO */}
+                  <button onClick={()=>setTypedAnswer(p=>p.slice(0,-1))}
+                    style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#ff6b35",fontSize:22,padding:"18px 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:64,touchAction:"manipulation" }}>⌫</button>
+                  <button onClick={()=>setTypedAnswer(p=>p+"0")}
+                    style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#fff",fontSize:26,fontWeight:"bold",padding:"18px 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:64,touchAction:"manipulation" }}>0</button>
+                  <button onClick={handleTypedSubmit} disabled={!typedAnswer||!!feedback}
+                    style={{ background:typedAnswer?"#00ff8820":"transparent",border:`2px solid ${typedAnswer?"#00ff88":borderColor}`,color:typedAnswer?"#00ff88":mutedColor,fontSize:16,fontWeight:"bold",letterSpacing:2,padding:"18px 0",borderRadius:12,cursor:typedAnswer?"pointer":"default",fontFamily:"inherit",minHeight:64,touchAction:"manipulation" }}>GO</button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1221,8 +1271,8 @@ export default function MathGame() {
           {/* XP gained */}
           <div style={{ ...panelStyle }}>
             <div style={{ fontSize:13,color:xpRank.color,letterSpacing:3,marginBottom:6 }}>{xpRank.name} · {xp} XP</div>
-            <div style={{ height:4,background:borderColor,borderRadius:2,overflow:"hidden" }}>
-              <div style={{ height:"100%",width:`${xpPct(xp)}%`,background:xpRank.color,transition:"width 0.8s" }} />
+            <div style={{ height:8,background:"#ff446622",borderRadius:4,overflow:"hidden" }}>
+              <div style={{ height:"100%",width:`${xpPct(xp)}%`,background:xpRank.color,transition:"width 0.8s",borderRadius:4 }} />
             </div>
             <div style={{ fontSize:8,color:mutedColor,marginTop:4 }}>{xpToNext(xp)} XP to next rank</div>
           </div>
@@ -1231,7 +1281,7 @@ export default function MathGame() {
           {weakTopics.length>0&&(<div style={{ ...panelStyle,border:`1px solid #ff446633` }}>
             <div style={{ fontSize:12,color:"#ff4466",letterSpacing:3,marginBottom:8 }}>⚠ FOCUS AREAS</div>
             {weakTopics.map(w=>(<div key={w.topic} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-              <span style={{ fontSize:12,color:textColor,letterSpacing:1,textTransform:"uppercase" }}>{w.topic}</span>
+              <span style={{ fontSize:12,color:"#fff",letterSpacing:1,textTransform:"uppercase" }}>{w.topic}</span>
               <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                 <div style={{ width:70,height:4,background:borderColor,borderRadius:2,overflow:"hidden" }}>
                   <div style={{ height:"100%",width:`${w.pct}%`,background:w.pct<50?"#ff4466":"#ffcc00",borderRadius:2 }} />
@@ -1245,7 +1295,7 @@ export default function MathGame() {
           <div style={{ ...panelStyle,textAlign:"left",maxHeight:160,overflowY:"auto" }}>
             <div style={{ fontSize:11,color:mutedColor,letterSpacing:3,marginBottom:8 }}>QUESTION LOG</div>
             {sessionHistory.map((h,i)=>(<div key={i} style={{ display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:9 }}>
-              <span style={{ color:textColor,fontFamily:"monospace" }}>{h.question}</span>
+              <span style={{ color:"#ffffffcc",fontFamily:"monospace" }}>{h.question}</span>
               <div style={{ display:"flex",gap:8 }}>
                 <span style={{ color:mutedColor }}>{h.elapsed}s</span>
                 <span style={{ color:h.correct?"#00ff88":"#ff4466" }}>{h.correct?"✓":"✗"}</span>
