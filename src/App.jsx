@@ -39,14 +39,14 @@ function generateBasic(diff) {
     if (op === "+") { a = rand(1,20); b = rand(1,20); answer = a+b; question=`${a} + ${b}`; steps=[`${a} + ${b} = ${answer}`]; }
     else { a = rand(5,30); b = rand(1,a); answer=a-b; question=`${a} − ${b}`; steps=[`${a} − ${b} = ${answer}`]; }
   } else if (diff === "medium") {
-    if (op==="+") { a=rand(10,99);b=rand(10,99);answer=a+b;question=`${a} + ${b}`;steps=[`Add tens: ${Math.floor(a/10)*10}+${Math.floor(b/10)*10}=${Math.floor(a/10)*10+Math.floor(b/10)*10}`,`Add ones: ${a%10}+${b%10}=${a%10+b%10}`,`Total = ${answer}`];shortcut=`Round to nearest 10, adjust`; }
-    else if (op==="-") { a=rand(20,99);b=rand(1,a);answer=a-b;question=`${a} − ${b}`;steps=[`${a} − ${b} = ${answer}`];shortcut=`Count up from ${b} to ${a}`; }
-    else if (op==="×") { a=rand(2,12);b=rand(2,12);answer=a*b;question=`${a} × ${b}`;steps=[`${a} × ${b} = ${answer}`];shortcut=a>6?`${a} × ${b} = ${Math.floor(a/2)*2} × ${b} + ${a%2} × ${b}`:null; }
-    else { a=rand(2,12);b=rand(2,12);answer=a;question=`${a*b} ÷ ${b}`;steps=[`Think: ${b} × ? = ${a*b}`,`Answer = ${a}`]; }
+    if (op==="+") { a=rand(11,98);b=rand(13,97);answer=a+b;question=`${a} + ${b}`;steps=[`Add tens: ${Math.floor(a/10)*10}+${Math.floor(b/10)*10}=${Math.floor(a/10)*10+Math.floor(b/10)*10}`,`Add ones: ${a%10}+${b%10}=${a%10+b%10}`,`Total = ${answer}`];shortcut=`Round to nearest 10, adjust`; }
+    else if (op==="-") { a=rand(23,99);b=rand(3,a-3);answer=a-b;question=`${a} − ${b}`;steps=[`${a} − ${b} = ${answer}`];shortcut=`Count up from ${b} to ${a}`; }
+    else if (op==="×") { a=rand(2,13);b=rand(2,13);answer=a*b;question=`${a} × ${b}`;steps=[`${a} × ${b} = ${answer}`];shortcut=a>6?`${a} × ${b} = ${Math.floor(a/2)*2} × ${b} + ${a%2} × ${b}`:null; }
+    else { a=rand(2,13);b=rand(2,13);answer=a;question=`${a*b} ÷ ${b}`;steps=[`Think: ${b} × ? = ${a*b}`,`Answer = ${a}`]; }
   } else {
-    if (op==="+") { a=rand(100,999);b=rand(100,999);answer=a+b;question=`${a} + ${b}`;steps=[`Hundreds: ${Math.floor(a/100)+Math.floor(b/100)}00`,`Tens+ones: ${a%100}+${b%100}=${a%100+b%100}`,`= ${answer}`];shortcut=`Round ${a}→${Math.round(a/100)*100}, adjust by ${Math.round(a/100)*100-a}`; }
-    else if (op==="-") { a=rand(200,999);b=rand(10,a);answer=a-b;question=`${a} − ${b}`;steps=[`${a} − ${b} = ${answer}`];shortcut=`Round ${b} to nearest 10, subtract, readjust`; }
-    else if (op==="×") { a=rand(13,30);b=rand(13,30);answer=a*b;question=`${a} × ${b}`;steps=[`${a}×${Math.floor(b/10)*10}=${a*Math.floor(b/10)*10}`,`${a}×${b%10}=${a*(b%10)}`,`Sum=${answer}`];shortcut=`(${Math.ceil(a/10)*10}−${Math.ceil(a/10)*10-a})×${b}`; }
+    if (op==="+") { a=rand(103,997);b=rand(107,993);answer=a+b;question=`${a} + ${b}`;steps=[`Hundreds: ${Math.floor(a/100)+Math.floor(b/100)}00`,`Tens+ones: ${a%100}+${b%100}=${a%100+b%100}`,`= ${answer}`];shortcut=`Round ${a}→${Math.round(a/100)*100}, adjust by ${Math.round(a/100)*100-a}`; }
+    else if (op==="-") { a=rand(205,999);b=rand(11,a-5);answer=a-b;question=`${a} − ${b}`;steps=[`${a} − ${b} = ${answer}`];shortcut=`Round ${b} to nearest 10, subtract, readjust`; }
+    else if (op==="×") { a=rand(12,35);b=rand(11,32);answer=a*b;question=`${a} × ${b}`;steps=[`${a}×${Math.floor(b/10)*10}=${a*Math.floor(b/10)*10}`,`${a}×${b%10}=${a*(b%10)}`,`Sum=${answer}`];shortcut=`(${Math.ceil(a/10)*10}−${Math.ceil(a/10)*10-a})×${b}`; }
     else { a=rand(3,25);b=rand(3,25);answer=a;question=`${a*b} ÷ ${b}`;steps=[`${a*b}÷${b}=${answer}`,`Check: ${b}×${a}=${a*b}`]; }
   }
   return { question, answer, hint:`${question} = ?`, steps:steps||[`${question}=${answer}`], shortcut:shortcut||null, topic: op==="+"?"addition":op==="-"?"subtraction":op==="×"?"multiplication":"division" };
@@ -58,8 +58,8 @@ function generateAlgebra(diff) {
     return { question:`x + ${b} = ${c}`, answer:x, hint:"Solve for x", steps:[`x + ${b} = ${c}`,`x = ${c} − ${b} = ${x}`], shortcut:null, topic:"algebra" };
   } else if (diff==="medium") {
     const type=rand(0,2);
-    if (type===0) { const a=rand(2,9),b=rand(1,20),x=rand(1,15); return { question:`${a}x + ${b} = ${a*x+b}`, answer:x, hint:"Solve for x", steps:[`${a}x = ${a*x+b}-${b} = ${a*x}`,`x = ${a*x}÷${a} = ${x}`], shortcut:"Subtract constant, then divide", topic:"algebra" }; }
-    else if (type===1) { const p=rand(10,90),total=rand(100,500),ans=Math.round(p*total/100); return { question:`${p}% of ${total}`, answer:ans, hint:"Calculate %", steps:[`${p}/100 × ${total} = ${ans}`], shortcut:`10% = ${total/10}, scale to ${p}%`, topic:"percentages" }; }
+    if (type===0) { const a=rand(2,9),b=rand(2,25),x=rand(2,18); return { question:`${a}x + ${b} = ${a*x+b}`, answer:x, hint:"Solve for x", steps:[`${a}x = ${a*x+b}-${b} = ${a*x}`,`x = ${a*x}÷${a} = ${x}`], shortcut:"Subtract constant, then divide", topic:"algebra" }; }
+    else if (type===1) { const p=rand(5,95),total=rand(80,600),ans=Math.round(p*total/100); return { question:`${p}% of ${total}`, answer:ans, hint:"Calculate %", steps:[`${p}/100 × ${total} = ${ans}`], shortcut:`10% = ${total/10}, scale to ${p}%`, topic:"percentages" }; }
     else { const a=rand(2,9),b=rand(2,9),x=rand(1,10); return { question:`${a}x − ${b} = ${a*x-b}`, answer:x, hint:"Solve for x", steps:[`${a}x = ${a*x-b}+${b} = ${a*x}`,`x = ${x}`], shortcut:"Add constant first, then divide", topic:"algebra" }; }
   } else {
     const type=rand(0,2);
@@ -75,14 +75,15 @@ function generateAdvanced(diff) {
     if (t===0) { const sq=[4,9,16,25,36,49,64,81,100],s=sq[rand(0,sq.length-1)],ans=Math.sqrt(s); return { question:`√${s}`, answer:ans, hint:"Square root", steps:[`√${s} = ${ans}`,`Check: ${ans}²=${s}`], shortcut:"Memorise perfect squares to 100", topic:"roots" }; }
     else { const a=rand(5,20),b=rand(5,20),c=rand(5,20),ans=Math.round((a+b+c)/3); return { question:`avg(${a},${b},${c})`, answer:ans, hint:"Average", steps:[`Sum=${a+b+c}`,`÷3 = ${ans}`], shortcut:null, topic:"averages" }; }
   } else if (diff==="medium") {
-    const t=rand(0,3);
-    if (t===0) { const base=rand(2,5),exp=rand(2,4),ans=Math.pow(base,exp); return { question:`${base}^${exp}`, answer:ans, hint:`${base} to the power ${exp}`, steps:Array.from({length:exp},(_,i)=>`${base}^${i+1}=${Math.pow(base,i+1)}`), shortcut:null, topic:"powers" }; }
+    const t=rand(0,4);
+    if (t===0) { const base=rand(2,6),exp=rand(2,4),ans=Math.pow(base,exp); return { question:`${base}^${exp}`, answer:ans, hint:`${base} to the power ${exp}`, steps:Array.from({length:exp},(_,i)=>`${base}^${i+1}=${Math.pow(base,i+1)}`), shortcut:null, topic:"powers" }; }
     else if (t===1) { const sq=[4,9,16,25,36,49,64,81,100,121,144,169,196,225],s=sq[rand(0,sq.length-1)],ans=Math.sqrt(s); return { question:`√${s}`, answer:ans, hint:"Square root", steps:[`${ans}²=${s}`,`√${s}=${ans}`], shortcut:null, topic:"roots" }; }
     else if (t===2) { const a=rand(2,8),b=rand(2,8),x=rand(2,8),y=rand(2,8),ans=a*x+b*y; return { question:`${a}(${x})+${b}(${y})`, answer:ans, hint:"Evaluate", steps:[`${a}×${x}=${a*x}`,`${b}×${y}=${b*y}`,`=${ans}`], shortcut:null, topic:"expressions" }; }
-    else { const a=rand(10,50),b=rand(10,50),c=rand(10,50),ans=Math.round((a+b+c)/3); return { question:`avg(${a},${b},${c})`, answer:ans, hint:"Average (round)", steps:[`${a}+${b}+${c}=${a+b+c}`,`÷3=${ans}`], shortcut:null, topic:"averages" }; }
+    else if (t===3) { const a=rand(10,60),b=rand(10,60),c=rand(10,60),ans=Math.round((a+b+c)/3); return { question:`avg(${a},${b},${c})`, answer:ans, hint:"Average (round)", steps:[`${a}+${b}+${c}=${a+b+c}`,`÷3=${ans}`], shortcut:null, topic:"averages" }; }
+    else { const a=rand(3,9),b=rand(3,9),x=rand(3,9),y=rand(3,9),ans=a*x+b*y; return { question:`${a}(${x}) + ${b}(${y})`, answer:ans, hint:"Evaluate", steps:[`${a}×${x}=${a*x}`,`${b}×${y}=${b*y}`,`=${ans}`], shortcut:null, topic:"expressions" }; }
   } else {
     const t=rand(0,3);
-    if (t===0) { const base=rand(3,12),exp=rand(2,5),ans=Math.pow(base,exp); return { question:`${base}^${exp}`, answer:ans, hint:`${base} to the power ${exp}`, steps:Array.from({length:exp},(_,i)=>`${base}^${i+1}=${Math.pow(base,i+1)}`), shortcut:`Use (${base}^${Math.floor(exp/2)})² pattern`, topic:"powers" }; }
+    if (t===0) { const base=rand(2,15),exp=rand(2,5),ans=Math.pow(base,exp); return { question:`${base}^${exp}`, answer:ans, hint:`${base} to the power ${exp}`, steps:Array.from({length:exp},(_,i)=>`${base}^${i+1}=${Math.pow(base,i+1)}`), shortcut:`Use (${base}^${Math.floor(exp/2)})² pattern`, topic:"powers" }; }
     else if (t===1) { const sq=[4,9,16,25,36,49,64,81,100,121,144,169,196,225,256,289,324,361,400,441,484,529],s=sq[rand(0,sq.length-1)],ans=Math.sqrt(s); return { question:`√${s}`, answer:ans, hint:"Square root", steps:[`${ans}²=${s}`,`√${s}=${ans}`], shortcut:"Use nearby perfect squares", topic:"roots" }; }
     else if (t===2) { const a=rand(4,15),b=rand(4,15),c=rand(4,15),x=rand(4,12),y=rand(4,12),ans=a*x+b*y-c; return { question:`${a}(${x})+${b}(${y})−${c}`, answer:ans, hint:"Evaluate", steps:[`${a}×${x}=${a*x}`,`${b}×${y}=${b*y}`,`${a*x}+${b*y}-${c}=${ans}`], shortcut:null, topic:"expressions" }; }
     else { const nums=Array.from({length:5},()=>rand(20,300)),sum=nums.reduce((s,n)=>s+n,0),ans=Math.round(sum/5); return { question:`avg(${nums.join(",")})`, answer:ans, hint:"Average 5 nums (round)", steps:[`Sum=${sum}`,`÷5=${ans}`], shortcut:"Estimate middle, check balance", topic:"averages" }; }
@@ -90,9 +91,16 @@ function generateAdvanced(diff) {
 }
 
 function generateEstimation(diff) {
-  const pairs = diff==="easy"?[[47,6],[83,9],[124,7]]:diff==="medium"?[[847,19],[1253,31],[672,28]]:[[8472,193],[12530,310],[67200,280]];
-  const [dividend,divisor]=pairs[rand(0,pairs.length-1)];
-  const exact=dividend/divisor, rounded=Math.round(exact);
+  // Generate random estimation pairs dynamically to avoid repetition
+  let dividend, divisor, rounded, exact;
+  if (diff==="easy") {
+    dividend = rand(30,200); divisor = rand(3,15);
+  } else if (diff==="medium") {
+    dividend = rand(300,2000); divisor = rand(12,60);
+  } else {
+    dividend = rand(2000,20000); divisor = rand(80,500);
+  }
+  exact = dividend/divisor; rounded = Math.round(exact);
   const opts=[rounded,rounded+rand(2,8),rounded-rand(2,8),rounded+rand(10,20)].sort(()=>Math.random()-0.5);
   return { question:`≈ ${dividend} ÷ ${divisor}`, answer:rounded, hint:"Best estimate", steps:[`≈${Math.round(dividend/100)*100}÷${Math.round(divisor/10)*10}≈${rounded}`], shortcut:"Round to 1 sig fig each", topic:"estimation", isEstimation:true, estimationOpts:opts };
 }
@@ -134,19 +142,80 @@ function generateSudoku(diff) {
   return { solved: grid.map(r=>[...r]), puzzle: puzzle.map(r=>[...r]) };
 }
 
-// ── Global persistent state ──
-let globalXP = 0;
-let globalStats = {};
-let globalBests = {};
-let dailyStreak = { lastDate: null, count: 0 };
+// ── Persistence helpers ──
+const STORAGE_KEY = "mathos_save_v1";
+
+function loadSave() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+function writeSave(data) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
+}
+
+function buildDefaultSave() {
+  return {
+    xp: 0,
+    stats: {},
+    powerups: { fifty: 2, time: 2, skip: 2 },
+    missedQuestions: [],
+    streak: { lastDate: null, count: 0 },
+    xpPenaltyApplied: null, // date string of last penalty applied
+  };
+}
+
+// Load or init save
+let save = loadSave() || buildDefaultSave();
+
+// ── Apply streak XP penalty on load ──
+// For every missed day since last play, reduce XP by 25% (compounded)
+(function applyStreakPenalty() {
+  if (!save.streak.lastDate) return;
+  const last = new Date(save.streak.lastDate);
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  last.setHours(0,0,0,0);
+  const diffDays = Math.round((today - last) / 86400000);
+  // diffDays=0: same day, diffDays=1: yesterday (ok), diffDays>=2: missed days
+  const missedDays = Math.max(0, diffDays - 1);
+  if (missedDays > 0 && save.xpPenaltyApplied !== today.toDateString()) {
+    // Compound 25% reduction per missed day: XP = XP * 0.75^missedDays
+    const factor = Math.pow(0.75, missedDays);
+    save.xp = Math.max(0, Math.floor(save.xp * factor));
+    save.streak.count = 0; // streak broken
+    save.xpPenaltyApplied = today.toDateString();
+    writeSave(save);
+  }
+})();
+
+// ── Global state (backed by save) ──
+let globalXP = save.xp;
+let globalStats = save.stats || {};
+let globalPowerups = save.powerups || { fifty: 2, time: 2, skip: 2 };
+let missedQuestions = (save.missedQuestions || []).map(q => ({...q}));
+let dailyStreak = save.streak || { lastDate: null, count: 0 };
 let sessionHistory = [];
-let globalPowerups = { fifty: 2, time: 2, skip: 2 };
-let missedQuestions = [];
 let spacedQueue = [];
+const recentQuestions = new Set(); // tracks last 20 question strings to avoid repeats
+const MAX_RECENT = 20;
+
+function persistAll() {
+  save.xp = globalXP;
+  save.stats = globalStats;
+  save.powerups = globalPowerups;
+  save.missedQuestions = missedQuestions;
+  save.streak = dailyStreak;
+  writeSave(save);
+}
 
 function recordStat(topic, correct) {
   if (!globalStats[topic]) globalStats[topic]={correct:0,total:0};
   globalStats[topic].total++; if (correct) globalStats[topic].correct++;
+  persistAll();
 }
 function getWeakTopics() {
   return Object.entries(globalStats).filter(([,v])=>v.total>=2).sort(([,a],[,b])=>(a.correct/a.total)-(b.correct/b.total)).slice(0,3).map(([k,v])=>({topic:k,pct:Math.round(v.correct/v.total*100),total:v.total}));
@@ -253,6 +322,7 @@ export default function MathGame() {
   const [consWrong, setConsWrong] = useState(0);
   const [weakTopics, setWeakTopics] = useState([]);
   const [xp, setXp] = useState(globalXP);
+  const [xpPenaltyInfo, setXpPenaltyInfo] = useState(()=>{ const s=loadSave(); if(!s) return null; const last=s.streak?.lastDate; if(!last) return null; const diff=Math.round((new Date().setHours(0,0,0,0)-new Date(last).setHours(0,0,0,0))/86400000); const missed=Math.max(0,diff-1); return missed>0&&s.xpPenaltyApplied===new Date().toDateString()?missed:null; });
   const [powerups, setPowerups] = useState({...globalPowerups});
   const [hiddenChoices, setHiddenChoices] = useState([]);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -347,7 +417,26 @@ export default function MathGame() {
   }, [getEffDiff,isDrill,drillTopics,isReview]);
 
   const loadQuestion = useCallback((lvlIdx2=levelIdx) => {
-    const q = makeQuestion(lvlIdx2);
+    // Anti-repetition: try up to 10 times to get a non-recent question
+    let q = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = makeQuestion(lvlIdx2);
+      if (!candidate) break; // review mode pool empty
+      if (!recentQuestions.has(candidate.question)) {
+        q = candidate;
+        break;
+      }
+      // On last attempt, just use it regardless
+      if (attempt === 9) q = candidate;
+    }
+    if (!q) return; // nothing to show (review pool empty)
+    // Track this question as recently seen
+    recentQuestions.add(q.question);
+    if (recentQuestions.size > MAX_RECENT) {
+      // Remove oldest entry
+      const first = recentQuestions.values().next().value;
+      recentQuestions.delete(first);
+    }
     setCurrent(q);
     setChoices(q.isEstimation?q.estimationOpts:generateWrongAnswers(q.answer));
     setFeedback(null); setSelectedIdx(null); setTypedAnswer("");
@@ -460,6 +549,7 @@ export default function MathGame() {
       const yesterday=new Date(Date.now()-86400000).toDateString();
       dailyStreak.count = dailyStreak.lastDate===yesterday ? dailyStreak.count+1 : 1;
       dailyStreak.lastDate=today;
+      persistAll();
     }
     if (isRace) { setRaceScores([0,0]); setRaceRound(0); setRaceWinner(null); setRaceInput(["",""]); setRaceFeedback([null,null]); setScreen("race"); }
     else { setLevelIdx(0); setQIdx(0); setScreen("game"); }
@@ -516,7 +606,7 @@ export default function MathGame() {
       const pts=isSpeed?speedBonus:10*streakBonus+timeLeft;
       const earnedXP=pts+5;
       setScore(s=>s+pts);
-      setXp(x=>{ const nx=x+earnedXP; globalXP=nx; return nx; });
+      setXp(x=>{ const nx=x+earnedXP; globalXP=nx; persistAll(); return nx; });
       setStreak(s=>{ const ns=s+1; setMaxStreak(m=>Math.max(m,ns));
         if (ns%5===0) { setShowCelebration(true); setTimeout(()=>setShowCelebration(false),2000); spawnParticles(true,true); snd("streak"); }
         return ns;
@@ -525,6 +615,7 @@ export default function MathGame() {
       // In review mode, remove from missed pool when answered correctly
       if (isReview) {
         missedQuestions = missedQuestions.filter(q=>q.question!==current.question);
+        persistAll();
       }
       setConsCorrect(c=>{ const nc=c+1; if(nc>=3){setAdaptiveLevel(l=>Math.min(1,l+1));return 0;} return nc; });
       setConsWrong(0);
@@ -537,6 +628,7 @@ export default function MathGame() {
       // Add to persistent wrong answers pool (avoid duplicates by question text)
       if (!missedQuestions.find(q=>q.question===current.question)) {
         missedQuestions.push({...current});
+        persistAll();
       }
       setConsWrong(w=>{ const nw=w+1; if(nw>=2){setAdaptiveLevel(l=>Math.max(-1,l-1));return 0;} return nw; });
       setConsCorrect(0);
@@ -593,11 +685,11 @@ export default function MathGame() {
     if (type==="fifty"&&powerups.fifty>0) {
       const wrongOnes=choices.filter(c=>Number(c)!==Number(current.answer));
       const toHide=[wrongOnes[rand(0,wrongOnes.length-1)],wrongOnes[rand(0,wrongOnes.length-1)]];
-      setHiddenChoices(toHide); setPowerups(p=>({...p,fifty:p.fifty-1})); globalPowerups.fifty--;
+      setHiddenChoices(toHide); setPowerups(p=>({...p,fifty:p.fifty-1})); globalPowerups.fifty--; persistAll();
     } else if (type==="time"&&powerups.time>0) {
-      setTimeLeft(t=>t+10); setPowerups(p=>({...p,time:p.time-1})); globalPowerups.time--;
+      setTimeLeft(t=>t+10); setPowerups(p=>({...p,time:p.time-1})); globalPowerups.time--; persistAll();
     } else if (type==="skip"&&powerups.skip>0) {
-      setPowerups(p=>({...p,skip:p.skip-1})); globalPowerups.skip--;
+      setPowerups(p=>({...p,skip:p.skip-1})); globalPowerups.skip--; persistAll();
       setQIdx(q=>q+1); loadQuestion(levelIdx);
     }
   }
@@ -712,6 +804,14 @@ export default function MathGame() {
         <div style={{ fontSize:10, letterSpacing:6, color:"#00ff88", marginBottom:8, opacity:0.6 }}>SELECT MODULE</div>
         <h1 style={{ fontSize:"clamp(44px,11vw,72px)", color:textColor, margin:"0 0 4px", textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844", animation:"glitch 3s infinite", letterSpacing:3 }}>MATH<span style={{color:"#00ff88"}}>_</span>OS</h1>
         <div style={{ color:"#00ff88", fontSize:13, letterSpacing:5, marginBottom:24, opacity:0.7 }}>COGNITIVE TRAINING SYSTEM v3.0</div>
+
+        {/* XP penalty notification */}
+        {xpPenaltyInfo&&(
+          <div style={{ background:"#ff446618",border:"1px solid #ff446666",borderRadius:10,padding:"12px 16px",marginBottom:12,textAlign:"left",animation:"fadeIn 0.5s ease" }}>
+            <div style={{ fontSize:13,color:"#ff4466",fontWeight:"bold",marginBottom:4 }}>⚠️ Streak broken!</div>
+            <div style={{ fontSize:11,color:"#fff" }}>You missed {xpPenaltyInfo} day{xpPenaltyInfo>1?"s":""} — your XP was reduced by {Math.round((1-Math.pow(0.75,xpPenaltyInfo))*100)}%. Play daily to protect your XP!</div>
+          </div>
+        )}
 
         {/* XP Bar */}
         <div style={{ ...panelStyle, marginBottom:20 }}>
