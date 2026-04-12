@@ -142,6 +142,163 @@ function generateSudoku(diff) {
   return { solved: grid.map(r=>[...r]), puzzle: puzzle.map(r=>[...r]) };
 }
 
+
+// ── Vocabulary Data ──
+const VOCAB_WORDS = [
+  { word:"Amiable", meaning:"friendly and pleasant", sentence:"She had an amiable personality that made everyone feel welcome.", diff:"easy", cat:"social", antonyms:["hostile","gloomy","reserved","irritable"] },
+  { word:"Benevolent", meaning:"well-meaning and kindly", sentence:"The benevolent donor funded the entire school library.", diff:"easy", cat:"character", antonyms:["cruel","selfish","malicious","indifferent"] },
+  { word:"Candid", meaning:"truthful and straightforward", sentence:"She gave a candid assessment of the project's flaws.", diff:"easy", cat:"communication", antonyms:["deceptive","evasive","dishonest","guarded"] },
+  { word:"Diligent", meaning:"having or showing care in one's work", sentence:"The diligent student reviewed her notes every evening.", diff:"easy", cat:"character", antonyms:["lazy","careless","negligent","idle"] },
+  { word:"Eloquent", meaning:"fluent and persuasive in speaking or writing", sentence:"His eloquent speech moved the entire audience to tears.", diff:"easy", cat:"communication", antonyms:["inarticulate","mumbling","clumsy","halting"] },
+  { word:"Frugal", meaning:"sparing or economical with money or food", sentence:"Living frugally allowed her to save enough to travel the world.", diff:"easy", cat:"lifestyle", antonyms:["wasteful","lavish","extravagant","spendthrift"] },
+  { word:"Gregarious", meaning:"fond of company; sociable", sentence:"The gregarious host made sure no guest felt left out.", diff:"easy", cat:"social", antonyms:["introverted","solitary","reclusive","antisocial"] },
+  { word:"Humble", meaning:"having a modest opinion of oneself", sentence:"Despite his fame, he remained humble and approachable.", diff:"easy", cat:"character", antonyms:["arrogant","conceited","boastful","proud"] },
+  { word:"Immense", meaning:"extremely large or great", sentence:"The library held an immense collection of rare manuscripts.", diff:"easy", cat:"size", antonyms:["tiny","minute","negligible","minuscule"] },
+  { word:"Jubilant", meaning:"feeling or expressing great happiness", sentence:"The team was jubilant after winning the championship.", diff:"easy", cat:"emotion", antonyms:["sorrowful","dejected","miserable","despondent"] },
+  { word:"Keen", meaning:"having a sharp or penetrating mind", sentence:"Her keen intellect allowed her to solve the puzzle quickly.", diff:"easy", cat:"character", antonyms:["dull","obtuse","slow","uninterested"] },
+  { word:"Lucid", meaning:"expressed clearly; easy to understand", sentence:"The professor gave a lucid explanation of quantum physics.", diff:"easy", cat:"communication", antonyms:["confusing","vague","murky","obscure"] },
+  { word:"Meticulous", meaning:"showing great attention to detail", sentence:"The meticulous editor caught every grammatical error.", diff:"easy", cat:"character", antonyms:["careless","sloppy","haphazard","negligent"] },
+  { word:"Nurture", meaning:"care for and encourage the growth of", sentence:"Good parents nurture both the mind and spirit of their children.", diff:"easy", cat:"action", antonyms:["neglect","harm","ignore","abandon"] },
+  { word:"Optimistic", meaning:"hopeful and confident about the future", sentence:"She remained optimistic even during the most difficult times.", diff:"easy", cat:"emotion", antonyms:["pessimistic","cynical","hopeless","despairing"] },
+  { word:"Prudent", meaning:"acting with care and thought for the future", sentence:"It was prudent to save money before making the investment.", diff:"easy", cat:"character", antonyms:["reckless","impulsive","careless","foolish"] },
+  { word:"Resilient", meaning:"able to recover quickly from difficulties", sentence:"Children are often more resilient than adults give them credit for.", diff:"easy", cat:"character", antonyms:["fragile","weak","vulnerable","delicate"] },
+  { word:"Serene", meaning:"calm, peaceful, and untroubled", sentence:"The lake at dawn was absolutely serene.", diff:"easy", cat:"emotion", antonyms:["agitated","turbulent","chaotic","restless"] },
+  { word:"Tenacious", meaning:"holding firmly to something; persistent", sentence:"Her tenacious pursuit of justice inspired the entire community.", diff:"easy", cat:"character", antonyms:["yielding","irresolute","weak","spineless"] },
+  { word:"Vibrant", meaning:"full of energy and enthusiasm", sentence:"The vibrant city never seemed to sleep.", diff:"easy", cat:"quality", antonyms:["dull","lifeless","lethargic","bland"] },
+  { word:"Acrimony", meaning:"bitterness or ill feeling", sentence:"The divorce proceedings were filled with acrimony.", diff:"medium", cat:"emotion", antonyms:["goodwill","harmony","warmth","amity"] },
+  { word:"Bellicose", meaning:"demonstrating aggression; ready to fight", sentence:"His bellicose rhetoric alarmed neighbouring countries.", diff:"medium", cat:"character", antonyms:["peaceful","pacifist","conciliatory","gentle"] },
+  { word:"Capricious", meaning:"given to sudden changes of mood; unpredictable", sentence:"The capricious weather ruined their outdoor wedding plans.", diff:"medium", cat:"character", antonyms:["consistent","reliable","stable","predictable"] },
+  { word:"Dearth", meaning:"a scarcity or lack of something", sentence:"There was a dearth of qualified candidates for the position.", diff:"medium", cat:"quantity", antonyms:["abundance","surplus","plenty","excess"] },
+  { word:"Ephemeral", meaning:"lasting for a very short time", sentence:"Fame can be ephemeral; today's star is tomorrow's footnote.", diff:"medium", cat:"time", antonyms:["permanent","enduring","lasting","eternal"] },
+  { word:"Facetious", meaning:"treating serious issues with inappropriate humour", sentence:"His facetious remarks during the eulogy offended the family.", diff:"medium", cat:"communication", antonyms:["solemn","earnest","sincere","grave"] },
+  { word:"Garrulous", meaning:"excessively talkative, especially on trivial matters", sentence:"The garrulous neighbour made it impossible to leave quickly.", diff:"medium", cat:"communication", antonyms:["taciturn","reticent","quiet","reserved"] },
+  { word:"Hegemony", meaning:"leadership or dominance, especially of one country", sentence:"The empire maintained its hegemony through military strength.", diff:"medium", cat:"power", antonyms:["subservience","submission","dependence","weakness"] },
+  { word:"Imperious", meaning:"assuming power without justification; arrogant", sentence:"The imperious manager alienated the entire team.", diff:"medium", cat:"character", antonyms:["humble","meek","deferential","modest"] },
+  { word:"Juxtapose", meaning:"place close together for contrast or comparison", sentence:"The documentary juxtaposed scenes of luxury with abject poverty.", diff:"medium", cat:"action", antonyms:["separate","isolate","distance","segregate"] },
+  { word:"Laconic", meaning:"using very few words", sentence:"His laconic reply — just 'no' — ended the discussion.", diff:"medium", cat:"communication", antonyms:["verbose","garrulous","wordy","loquacious"] },
+  { word:"Malleable", meaning:"easily influenced; adaptable", sentence:"Young minds are malleable and absorb new ideas quickly.", diff:"medium", cat:"quality", antonyms:["rigid","stubborn","inflexible","obstinate"] },
+  { word:"Nefarious", meaning:"wicked or criminal", sentence:"The nefarious scheme defrauded thousands of investors.", diff:"medium", cat:"character", antonyms:["virtuous","righteous","honourable","moral"] },
+  { word:"Obfuscate", meaning:"render obscure, unclear, or unintelligible", sentence:"The politician used jargon to obfuscate the real issue.", diff:"medium", cat:"action", antonyms:["clarify","illuminate","explain","elucidate"] },
+  { word:"Perfidious", meaning:"deceitful and untrustworthy", sentence:"The perfidious ally switched sides at the worst moment.", diff:"medium", cat:"character", antonyms:["loyal","faithful","trustworthy","steadfast"] },
+  { word:"Querulous", meaning:"complaining in a petulant or whining manner", sentence:"The querulous passenger complained about every minor delay.", diff:"medium", cat:"character", antonyms:["content","satisfied","cheerful","easygoing"] },
+  { word:"Recalcitrant", meaning:"having an obstinately uncooperative attitude", sentence:"The recalcitrant student refused to follow any instructions.", diff:"medium", cat:"character", antonyms:["compliant","cooperative","amenable","obedient"] },
+  { word:"Sycophant", meaning:"a person who flatters to gain advantage", sentence:"The CEO was surrounded by sycophants who never challenged him.", diff:"medium", cat:"social", antonyms:["critic","adversary","challenger","detractor"] },
+  { word:"Truculent", meaning:"eager or quick to argue or fight; aggressively defiant", sentence:"The truculent defendant interrupted the judge repeatedly.", diff:"medium", cat:"character", antonyms:["peaceful","docile","gentle","cooperative"] },
+  { word:"Ubiquitous", meaning:"present, appearing, or found everywhere", sentence:"Smartphones have become ubiquitous in modern life.", diff:"medium", cat:"presence", antonyms:["rare","scarce","uncommon","absent"] },
+  { word:"Abstruse", meaning:"difficult to understand; obscure", sentence:"The professor's abstruse theories baffled even his colleagues.", diff:"hard", cat:"complexity", antonyms:["simple","clear","obvious","accessible"] },
+  { word:"Anathema", meaning:"something or someone greatly detested or loathed", sentence:"Dishonesty was anathema to her principled nature.", diff:"hard", cat:"emotion", antonyms:["blessing","treasure","delight","darling"] },
+  { word:"Byzantine", meaning:"excessively complicated or complex", sentence:"The Byzantine tax code defeated even experienced accountants.", diff:"hard", cat:"complexity", antonyms:["simple","straightforward","direct","uncomplicated"] },
+  { word:"Calumniate", meaning:"make false and defamatory statements about someone", sentence:"Rivals tried to calumniate the scientist to discredit her research.", diff:"hard", cat:"communication", antonyms:["praise","extol","commend","vindicate"] },
+  { word:"Denouement", meaning:"the final part of a narrative in which matters are resolved", sentence:"The denouement of the novel tied every loose thread together.", diff:"hard", cat:"literary", antonyms:["beginning","prelude","introduction","preamble"] },
+  { word:"Ebullience", meaning:"the quality of being cheerful and full of energy", sentence:"Her ebullience was infectious; the room lit up when she entered.", diff:"hard", cat:"emotion", antonyms:["depression","torpor","gloom","lethargy"] },
+  { word:"Fatuous", meaning:"silly and pointless", sentence:"His fatuous remarks contributed nothing to the debate.", diff:"hard", cat:"quality", antonyms:["astute","clever","profound","insightful"] },
+  { word:"Grandiloquent", meaning:"pompous or extravagant in language", sentence:"His grandiloquent speech impressed no one who knew the facts.", diff:"hard", cat:"communication", antonyms:["plain","simple","modest","understated"] },
+  { word:"Hubris", meaning:"excessive pride or self-confidence", sentence:"His hubris led him to underestimate every opponent.", diff:"hard", cat:"character", antonyms:["humility","modesty","diffidence","meekness"] },
+  { word:"Inimical", meaning:"tending to obstruct or harm; hostile", sentence:"The harsh climate was inimical to agriculture.", diff:"hard", cat:"quality", antonyms:["beneficial","favourable","conducive","supportive"] },
+  { word:"Jejune", meaning:"naive, simplistic, and superficial", sentence:"Critics dismissed his jejune analysis of a complex issue.", diff:"hard", cat:"quality", antonyms:["sophisticated","mature","nuanced","profound"] },
+  { word:"Kowtow", meaning:"act in an excessively subservient manner", sentence:"She refused to kowtow to the board's unreasonable demands.", diff:"hard", cat:"action", antonyms:["resist","defy","challenge","confront"] },
+  { word:"Lassitude", meaning:"physical or mental weariness; lack of energy", sentence:"After the gruelling expedition, lassitude overcame the team.", diff:"hard", cat:"emotion", antonyms:["vigour","energy","vitality","vivacity"] },
+  { word:"Machiavellian", meaning:"cunning, scheming, and unscrupulous", sentence:"His Machiavellian tactics secured power at any cost.", diff:"hard", cat:"character", antonyms:["principled","honest","ethical","straightforward"] },
+  { word:"Nadir", meaning:"the lowest or most unsuccessful point", sentence:"Losing the election was the nadir of his political career.", diff:"hard", cat:"position", antonyms:["zenith","pinnacle","apex","peak"] },
+  { word:"Obsequious", meaning:"obedient or attentive to an excessive degree", sentence:"The obsequious assistant agreed with everything the boss said.", diff:"hard", cat:"character", antonyms:["assertive","independent","forthright","bold"] },
+  { word:"Perspicacious", meaning:"having a ready insight; shrewd", sentence:"A perspicacious investor spotted the opportunity before anyone else.", diff:"hard", cat:"character", antonyms:["obtuse","imperceptive","unobservant","dense"] },
+  { word:"Quisling", meaning:"a traitor who collaborates with the enemy", sentence:"History branded him a quisling for betraying his country.", diff:"hard", cat:"character", antonyms:["patriot","loyalist","defender","hero"] },
+  { word:"Recondite", meaning:"not known by many people; obscure", sentence:"He specialised in recondite areas of medieval philosophy.", diff:"hard", cat:"knowledge", antonyms:["common","familiar","mainstream","well-known"] },
+  { word:"Solipsistic", meaning:"the view that only the self exists or can be known", sentence:"His solipsistic worldview made genuine empathy impossible.", diff:"hard", cat:"philosophy", antonyms:["altruistic","empathetic","communal","outward-looking"] },
+  { word:"Tendentious", meaning:"promoting a particular cause or point of view", sentence:"The tendentious article ignored any evidence that contradicted its thesis.", diff:"hard", cat:"communication", antonyms:["balanced","impartial","objective","neutral"] },
+  { word:"Verisimilitude", meaning:"the appearance of being true or real", sentence:"The novel's verisimilitude made readers forget it was fiction.", diff:"hard", cat:"quality", antonyms:["implausibility","fantasy","unreality","fiction"] },
+  { word:"Weltanschauung", meaning:"a particular philosophy or view of life", sentence:"Her travels transformed her Weltanschauung entirely.", diff:"hard", cat:"philosophy", antonyms:["ignorance","narrowness","myopia","bias"] },
+  { word:"Zeitgeist", meaning:"the defining spirit or mood of a particular period", sentence:"The film perfectly captured the zeitgeist of the 1960s.", diff:"hard", cat:"culture", antonyms:["anachronism","timelessness","irrelevance","obscurity"] },
+];
+
+// Total: 64 words
+
+
+// ── Vocabulary helpers ──
+const VOCAB_CATS = ["all","character","communication","social","emotion","lifestyle","action","quality","power","time","knowledge","literary","philosophy","culture","size","quantity","presence","position","complexity"];
+const VOCAB_MODES = [
+  { key:"word2meaning", label:"WORD → MEANING",   desc:"See the word, pick its definition", icon:"📖" },
+  { key:"meaning2word", label:"MEANING → WORD",   desc:"See the definition, identify the word", icon:"🔤" },
+  { key:"antonym",      label:"ANTONYM ROUND",    desc:"Pick the opposite meaning", icon:"↔️" },
+  { key:"spelling",     label:"SPELLING ROUND",   desc:"See the definition, type the word", icon:"✏️" },
+  { key:"review",       label:"❌ WRONG ANSWERS",  desc:"Words you got wrong (5 correct = mastered)", icon:"🔁" },
+];
+
+function getVocabPool(diff, cat, seenRecently) {
+  let pool = VOCAB_WORDS.filter(w => {
+    if (diff !== "all" && w.diff !== diff) return false;
+    if (cat !== "all" && w.cat !== cat) return false;
+    return true;
+  });
+  // Prefer unseen words
+  const unseen = pool.filter(w => !seenRecently.has(w.word));
+  return unseen.length >= 4 ? unseen : pool;
+}
+
+function makeVocabQuestion(word, mode, pool) {
+  if (mode === "word2meaning") {
+    const wrongs = pool.filter(w => w.word !== word.word).sort(() => Math.random() - 0.5).slice(0, 3).map(w => w.meaning);
+    const choices = [...wrongs, word.meaning].sort(() => Math.random() - 0.5);
+    return { type:"word2meaning", prompt: word.word, answer: word.meaning, choices, word };
+  }
+  if (mode === "meaning2word") {
+    const wrongs = pool.filter(w => w.word !== word.word).sort(() => Math.random() - 0.5).slice(0, 3).map(w => w.word);
+    const choices = [...wrongs, word.word].sort(() => Math.random() - 0.5);
+    return { type:"meaning2word", prompt: word.meaning, answer: word.word, choices, word };
+  }
+  if (mode === "antonym") {
+    const correct = word.antonyms[0];
+    // Wrong antonyms from other words
+    const otherAntonyms = pool.filter(w => w.word !== word.word).flatMap(w => w.antonyms).filter(a => !word.antonyms.includes(a));
+    const wrongs = otherAntonyms.sort(() => Math.random() - 0.5).slice(0, 3);
+    const choices = [...wrongs, correct].sort(() => Math.random() - 0.5);
+    return { type:"antonym", prompt: word.word, answer: correct, choices, word };
+  }
+  if (mode === "spelling") {
+    return { type:"spelling", prompt: word.meaning, answer: word.word.toLowerCase(), choices: null, word };
+  }
+  return null;
+}
+
+// Persistent vocab state helpers
+function loadVocabSave() {
+  try { const r = localStorage.getItem("mathos_vocab_v1"); return r ? JSON.parse(r) : null; } catch(e) { return null; }
+}
+function writeVocabSave(d) { try { localStorage.setItem("mathos_vocab_v1", JSON.stringify(d)); } catch(e) {} }
+function buildDefaultVocabSave() { return { wrongWords: {}, masteredWords: [], seenWords: [] }; }
+
+let vocabSave = loadVocabSave() || buildDefaultVocabSave();
+// wrongWords: { word: { count: N, correctStreak: N } }
+// masteredWords: [word strings mastered from review]
+// seenWords: [word strings seen recently — persistent]
+
+function recordVocabWrong(word) {
+  if (!vocabSave.wrongWords[word]) vocabSave.wrongWords[word] = { count: 0, correctStreak: 0 };
+  vocabSave.wrongWords[word].count++;
+  vocabSave.wrongWords[word].correctStreak = 0;
+  writeVocabSave(vocabSave);
+}
+
+function recordVocabCorrect(word) {
+  if (vocabSave.wrongWords[word]) {
+    vocabSave.wrongWords[word].correctStreak = (vocabSave.wrongWords[word].correctStreak || 0) + 1;
+    if (vocabSave.wrongWords[word].correctStreak >= 5) {
+      // Mastered — remove from wrong pool
+      delete vocabSave.wrongWords[word];
+      if (!vocabSave.masteredWords.includes(word)) vocabSave.masteredWords.push(word);
+    }
+  }
+  if (!vocabSave.seenWords.includes(word)) {
+    vocabSave.seenWords.push(word);
+    if (vocabSave.seenWords.length > 60) vocabSave.seenWords.shift();
+  }
+  writeVocabSave(vocabSave);
+}
+
+function getWrongWordsPool() {
+  return Object.keys(vocabSave.wrongWords).map(w => VOCAB_WORDS.find(v => v.word === w)).filter(Boolean);
+}
+
 // ── Persistence helpers ──
 const STORAGE_KEY = "mathos_save_v1";
 
@@ -329,6 +486,24 @@ export default function MathGame() {
   const [hintUsed, setHintUsed] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [showStats, setShowStats] = useState(false);
+
+  // ── Vocab module state ──
+  const [vocabMode, setVocabMode] = useState("word2meaning");
+  const [vocabDiff, setVocabDiff] = useState("easy");
+  const [vocabCat, setVocabCat] = useState("all");
+  const [vocabQ, setVocabQ] = useState(null);
+  const [vocabAnswer, setVocabAnswer] = useState("");
+  const [vocabFeedback, setVocabFeedback] = useState(null); // null | "correct" | "wrong"
+  const [vocabScore, setVocabScore] = useState(0);
+  const [vocabStreak, setVocabStreak] = useState(0);
+  const [vocabTotal, setVocabTotal] = useState(0);
+  const [vocabCorrect, setVocabCorrect] = useState(0);
+  const [vocabSessionWords, setVocabSessionWords] = useState([]);
+  const [vocabScreen, setVocabScreen] = useState("intro"); // intro | game | summary
+  const [vocabRecentSeen, setVocabRecentSeen] = useState(new Set());
+  const [showSentence, setShowSentence] = useState(false);
+  const [vocabQCount, setVocabQCount] = useState(10);
+  const [vocabQIdx, setVocabQIdx] = useState(0);
 
   // ── Audio round state ──
   const [audioMode, setAudioMode] = useState(false);        // questions spoken, not shown
@@ -534,6 +709,69 @@ export default function MathGame() {
     setVoiceStatus("");
   }
 
+  function loadVocabQuestion() {
+    let pool;
+    if (vocabMode === "review") {
+      pool = getWrongWordsPool();
+      if (pool.length === 0) { setVocabScreen("summary"); return; }
+    } else {
+      pool = getVocabPool(vocabDiff, vocabCat, vocabRecentSeen);
+      if (pool.length < 4) {
+        // Reset seen if pool too small
+        setVocabRecentSeen(new Set());
+        pool = getVocabPool(vocabDiff, vocabCat, new Set());
+      }
+    }
+    const word = pool[Math.floor(Math.random() * pool.length)];
+    const effectiveMode = vocabMode === "review" ? ["word2meaning","meaning2word","antonym"][Math.floor(Math.random()*3)] : vocabMode;
+    const q = makeVocabQuestion(word, effectiveMode, VOCAB_WORDS);
+    setVocabQ(q);
+    setVocabAnswer("");
+    setVocabFeedback(null);
+    setShowSentence(false);
+    setVocabRecentSeen(prev => { const n = new Set(prev); n.add(word.word); if(n.size>20){const f=n.values().next().value;n.delete(f);} return n; });
+  }
+
+  function handleVocabAnswer(chosen) {
+    if (vocabFeedback) return;
+    const correct = chosen.toLowerCase().trim() === vocabQ.answer.toLowerCase().trim();
+    setVocabFeedback(correct ? "correct" : "wrong");
+    setVocabTotal(t => t + 1);
+    setShowSentence(true);
+    const wordStr = vocabQ.word.word;
+    if (correct) {
+      setVocabScore(s => s + 10 + vocabStreak * 2);
+      setVocabStreak(s => s + 1);
+      setVocabCorrect(c => c + 1);
+      recordVocabCorrect(wordStr);
+      setXp(x => { const nx = x + 8; globalXP = nx; persistAll(); return nx; });
+    } else {
+      setVocabStreak(0);
+      recordVocabWrong(wordStr);
+    }
+    setVocabSessionWords(prev => [...prev, {
+      word: wordStr, meaning: vocabQ.word.meaning, sentence: vocabQ.word.sentence,
+      yourAnswer: chosen, correct, mode: vocabQ.type
+    }]);
+  }
+
+  function nextVocabQuestion() {
+    const next = vocabQIdx + 1;
+    if (vocabMode !== "review" && next >= vocabQCount) {
+      setVocabScreen("summary");
+    } else {
+      setVocabQIdx(next);
+      loadVocabQuestion();
+    }
+  }
+
+  function startVocabGame() {
+    setVocabScore(0); setVocabStreak(0); setVocabTotal(0); setVocabCorrect(0);
+    setVocabSessionWords([]); setVocabQIdx(0); setVocabFeedback(null);
+    setVocabScreen("game");
+    // loadVocabQuestion called via useEffect
+  }
+
   function handleStart() {
     if (isReview && missedQuestions.length === 0) {
       setInputError("No wrong answers yet! Play other modes first to build your review list.");
@@ -572,6 +810,9 @@ export default function MathGame() {
 
   // ── Load question on game start ──
   useEffect(() => { if (screen==="game") loadQuestion(levelIdx); }, [screen,levelIdx]);
+
+  // ── Load vocab question when vocab game starts ──
+  useEffect(() => { if (appMode==="vocab" && vocabScreen==="game") loadVocabQuestion(); }, [vocabScreen, appMode]);
 
   // ── Race question ──
   const [raceCurrent, setRaceCurrent] = useState(null);
@@ -843,6 +1084,13 @@ export default function MathGame() {
             <div>SUDOKU</div>
             <div style={{ fontSize:11, color:"#00cfff99", marginTop:4, letterSpacing:1 }}>Logic · Pattern · Deduction</div>
           </button>
+          <button onClick={()=>{setAppMode("vocab");setVocabScreen("intro");}} style={{ background:"transparent", border:"2px solid #a78bfa", color:"#a78bfa", padding:"24px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #a78bfa44", transition:"all 0.2s", minHeight:90 }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#a78bfa18";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div style={{ fontSize:32, marginBottom:8 }}>📚</div>
+            <div>VOCABULARY</div>
+            <div style={{ fontSize:11, color:"#a78bfa99", marginTop:4, letterSpacing:1 }}>Words · Meanings · Spelling · Antonyms</div>
+          </button>
         </div>
 
         {/* Settings row */}
@@ -871,6 +1119,299 @@ export default function MathGame() {
       </div>
     </div>
   );
+
+
+  // ── VOCAB MODULE ──
+  if (appMode==="vocab") {
+    const wrongCount = Object.keys(vocabSave.wrongWords).length;
+    const masteredCount = vocabSave.masteredWords.length;
+    const totalSeen = vocabSave.seenWords.length;
+    const vcol = "#a78bfa";
+    const vcolLight = "#a78bfa18";
+    const vcolBorder = "#a78bfa44";
+    const isSpelling = vocabQ?.type === "spelling";
+
+    return (
+      <div style={{ minHeight:"100vh", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 16px", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+        <style>{`
+          @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes fadeInFast{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes pop{0%{transform:scale(0);opacity:1}100%{transform:scale(2.5) translateY(-50px);opacity:0}}
+          @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+          @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+          .vbtn:hover{filter:brightness(1.2);transform:scale(1.02);}
+          .vchoice:active{transform:scale(0.97);}
+        `}</style>
+
+        {/* Header */}
+        <div style={{ width:"100%", maxWidth:480, paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+            <button onClick={()=>setAppMode("home")} style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", minHeight:44 }}>← HOME</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:4 }}>MODULE</div>
+              <div style={{ fontSize:14, color:vcol, letterSpacing:3 }}>VOCABULARY</div>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>setSoundOn(s=>!s)} style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"10px 14px", fontSize:14, cursor:"pointer", borderRadius:8, minHeight:44 }}>{soundOn?"🔊":"🔇"}</button>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ width:"100%", maxWidth:480, paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+
+        {/* ── INTRO ── */}
+        {vocabScreen==="intro"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <h2 style={{ fontSize:32, color:vcol, letterSpacing:3, margin:"0 0 4px", textShadow:`0 0 20px ${vcol}44` }}>📚 VOCAB</h2>
+            <div style={{ color:mutedColor, fontSize:12, letterSpacing:3, marginBottom:20 }}>TRAINING SYSTEM</div>
+
+            {/* Stats bar */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12, display:"flex", justifyContent:"space-between" }}>
+              <div style={{ textAlign:"center" }}><div style={{ fontSize:20, color:vcol, fontWeight:"bold" }}>{totalSeen}</div><div style={{ fontSize:9, color:mutedColor, letterSpacing:2 }}>SEEN</div></div>
+              <div style={{ textAlign:"center" }}><div style={{ fontSize:20, color:"#00ff88", fontWeight:"bold" }}>{masteredCount}</div><div style={{ fontSize:9, color:mutedColor, letterSpacing:2 }}>MASTERED</div></div>
+              <div style={{ textAlign:"center" }}><div style={{ fontSize:20, color:"#ff4466", fontWeight:"bold" }}>{wrongCount}</div><div style={{ fontSize:9, color:mutedColor, letterSpacing:2 }}>TO REVIEW</div></div>
+              <div style={{ textAlign:"center" }}><div style={{ fontSize:20, color:"#ffcc00", fontWeight:"bold" }}>{VOCAB_WORDS.length}</div><div style={{ fontSize:9, color:mutedColor, letterSpacing:2 }}>TOTAL</div></div>
+            </div>
+
+            {/* Mode selector */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"16px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>PRACTICE MODE</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {VOCAB_MODES.map(m => {
+                  const sel = vocabMode === m.key;
+                  const disabled = m.key === "review" && wrongCount === 0;
+                  return (
+                    <button key={m.key} onClick={()=>!disabled&&setVocabMode(m.key)} style={{ background:sel?vcolLight:"transparent", border:`1px solid ${sel?vcol:borderColor}`, borderRadius:10, padding:"12px 16px", cursor:disabled?"not-allowed":"pointer", fontFamily:"inherit", transition:"all 0.15s", textAlign:"left", display:"flex", alignItems:"center", gap:14, opacity:disabled?0.4:1 }}>
+                      <span style={{ fontSize:22 }}>{m.icon}</span>
+                      <div>
+                        <div style={{ fontSize:12, color:sel?vcol:"#fff", letterSpacing:2, marginBottom:2 }}>{m.label}</div>
+                        <div style={{ fontSize:10, color:mutedColor }}>
+                          {m.key==="review"?`${wrongCount} word${wrongCount!==1?"s":""} to review (5 correct = mastered)`:m.desc}
+                        </div>
+                      </div>
+                      {sel&&<div style={{ marginLeft:"auto", color:vcol, fontSize:16 }}>✓</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Difficulty + Category (not for review) */}
+            {vocabMode!=="review"&&(
+              <>
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+                  <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>DIFFICULTY</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
+                    {["all","easy","medium","hard"].map(d=>{
+                      const sel=vocabDiff===d;
+                      const col=d==="easy"?"#00ff88":d==="medium"?"#ffcc00":d==="hard"?"#ff4466":"#a78bfa";
+                      return <button key={d} onClick={()=>setVocabDiff(d)} style={{ background:sel?`${col}18`:"transparent", border:`1px solid ${sel?col:borderColor}`, borderRadius:8, padding:"10px 4px", cursor:"pointer", fontFamily:"inherit", color:sel?col:mutedColor, fontSize:11, letterSpacing:1, minHeight:40 }}>{d.toUpperCase()}</button>;
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+                  <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>CATEGORY</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                    {VOCAB_CATS.map(c=>{
+                      const sel=vocabCat===c;
+                      return <button key={c} onClick={()=>setVocabCat(c)} style={{ background:sel?vcolLight:"transparent", border:`1px solid ${sel?vcol:borderColor}`, borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"inherit", color:sel?vcol:"#fff", fontSize:10, letterSpacing:1, minHeight:36 }}>{c.toUpperCase()}</button>;
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+                  <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>NO. OF QUESTIONS</div>
+                  <select value={vocabQCount} onChange={e=>setVocabQCount(Number(e.target.value))} style={{ background:bg, border:`1px solid ${borderColor}`, color:"#fff", padding:"12px", fontSize:16, borderRadius:8, fontFamily:"inherit", width:"100%", outline:"none", minHeight:48, WebkitAppearance:"none" }}>
+                    {[5,10,15,20,25,30].map(n=><option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
+
+            <button onClick={startVocabGame} style={{ width:"100%", background:"transparent", border:`2px solid ${vcol}`, color:vcol, padding:"18px", fontSize:16, letterSpacing:5, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 20px ${vcol}44`, transition:"all 0.2s", minHeight:58 }}
+              onMouseEnter={e=>{e.currentTarget.style.background=vcolLight;}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+              [ START ]
+            </button>
+          </div>
+        )}
+
+        {/* ── GAME ── */}
+        {vocabScreen==="game"&&vocabQ&&(
+          <div style={{ animation:"fadeIn 0.3s ease" }}>
+            {/* HUD */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+              <div><div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>SCORE</div><div style={{ fontSize:22, color:"#fff", letterSpacing:2 }}>{vocabScore.toString().padStart(5,"0")}</div></div>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>
+                  {vocabMode==="review"?`❌ ${Object.keys(vocabSave.wrongWords).length} left`:`Q ${vocabQIdx+1} / ${vocabQCount}`}
+                </div>
+                <div style={{ fontSize:12, color:vcol, letterSpacing:2 }}>{VOCAB_MODES.find(m=>m.key===vocabMode)?.label||"REVIEW"}</div>
+              </div>
+              <div style={{ textAlign:"right" }}><div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>STREAK</div><div style={{ fontSize:18, color:vocabStreak>=3?"#ffcc00":"#fff" }}>{vocabStreak>=3?"🔥 ":""}×{vocabStreak}</div></div>
+            </div>
+
+            {/* Progress bar */}
+            {vocabMode!=="review"&&(
+              <div style={{ height:4, background:cardBg, borderRadius:2, marginBottom:16, overflow:"hidden" }}>
+                <div style={{ height:"100%", background:vcol, width:`${(vocabQIdx/vocabQCount)*100}%`, transition:"width 0.4s", borderRadius:2 }} />
+              </div>
+            )}
+
+            {/* Mode badge */}
+            <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+              <div style={{ background:vcolLight, border:`1px solid ${vcolBorder}`, borderRadius:20, padding:"4px 12px", fontSize:10, color:vcol, letterSpacing:2 }}>
+                {vocabQ.type==="word2meaning"?"WORD → MEANING":vocabQ.type==="meaning2word"?"MEANING → WORD":vocabQ.type==="antonym"?"ANTONYM":vocabQ.type==="spelling"?"SPELLING":"REVIEW"}
+              </div>
+              <div style={{ background:"transparent", border:`1px solid ${borderColor}`, borderRadius:20, padding:"4px 12px", fontSize:10, color:mutedColor }}>
+                {vocabQ.word.cat.toUpperCase()} · {vocabQ.word.diff.toUpperCase()}
+              </div>
+              {vocabSave.wrongWords[vocabQ.word.word]&&(
+                <div style={{ background:"#ff446618", border:"1px solid #ff446644", borderRadius:20, padding:"4px 12px", fontSize:10, color:"#ff4466" }}>
+                  ✓ {vocabSave.wrongWords[vocabQ.word.word].correctStreak||0}/5 correct
+                </div>
+              )}
+            </div>
+
+            {/* Question card */}
+            <div style={{ background:cardBg, border:`1px solid ${vcol}44`, borderRadius:12, padding:"28px 22px", marginBottom:16, textAlign:"center", boxShadow:`0 0 30px ${vcol}08` }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:3, marginBottom:12 }}>
+                {vocabQ.type==="word2meaning"?"WHAT DOES THIS WORD MEAN?":vocabQ.type==="meaning2word"?"WHICH WORD MATCHES THIS MEANING?":vocabQ.type==="antonym"?"WHAT IS THE ANTONYM OF...":vocabQ.type==="spelling"?"SPELL THE WORD FOR THIS MEANING:":"IDENTIFY THIS WORD"}
+              </div>
+              <div style={{ fontSize:"clamp(20px,5vw,36px)", color:"#fff", fontWeight:"bold", letterSpacing:2, lineHeight:1.3, marginBottom:showSentence?16:0 }}>{vocabQ.prompt}</div>
+
+              {/* Example sentence after answer */}
+              {showSentence&&(
+                <div style={{ animation:"slideUp 0.4s ease", marginTop:16, paddingTop:14, borderTop:`1px solid ${borderColor}` }}>
+                  <div style={{ fontSize:9, color:vcol, letterSpacing:3, marginBottom:6 }}>EXAMPLE</div>
+                  <div style={{ fontSize:13, color:"#ffffff99", fontStyle:"italic", lineHeight:1.5 }}>"{vocabQ.word.sentence}"</div>
+                  <div style={{ marginTop:10, display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
+                    <div style={{ fontSize:9, color:mutedColor, letterSpacing:2 }}>ANTONYMS:</div>
+                    {vocabQ.word.antonyms.slice(0,3).map(a=><span key={a} style={{ fontSize:10, color:"#ff6b35", border:"1px solid #ff6b3544", borderRadius:12, padding:"2px 8px" }}>{a}</span>)}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* MCQ choices */}
+            {!isSpelling&&vocabQ.choices&&(
+              <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:12 }}>
+                {vocabQ.choices.map((c,i)=>{
+                  const isCorrect = c.toLowerCase()===vocabQ.answer.toLowerCase();
+                  let bg=cardBg, border2=borderColor, col="#fff";
+                  if (vocabFeedback) {
+                    if (isCorrect) { bg="#00ff8818"; border2="#00ff88"; col="#00ff88"; }
+                    else if (c===vocabFeedback) { bg="#ff446618"; border2="#ff4466"; col="#ff4466"; }
+                  }
+                  return (
+                    <button key={i} className="vchoice" onClick={()=>handleVocabAnswer(c)} disabled={!!vocabFeedback}
+                      style={{ background:bg, border:`1px solid ${border2}`, color:col, padding:"16px 18px", fontSize:14, borderRadius:12, cursor:vocabFeedback?"default":"pointer", fontFamily:"inherit", textAlign:"left", transition:"all 0.15s", lineHeight:1.4, fontWeight:isCorrect&&vocabFeedback?"bold":"normal", minHeight:54 }}>
+                      {c}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Spelling input */}
+            {isSpelling&&(
+              <div style={{ marginBottom:12 }}>
+                <div style={{ background:cardBg, border:`1px solid ${vocabFeedback==="correct"?"#00ff88":vocabFeedback?"#ff4466":borderColor}`, borderRadius:12, padding:"16px 20px", marginBottom:10, textAlign:"center", minHeight:58, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <span style={{ fontSize:28, color:"#fff", letterSpacing:4, fontWeight:"bold" }}>{vocabAnswer||<span style={{color:mutedColor,fontSize:14}}>tap letters below</span>}</span>
+                </div>
+                {!vocabFeedback&&(
+                  <>
+                    {/* Letter keyboard */}
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5, marginBottom:8 }}>
+                      {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l=>(
+                        <button key={l} onClick={()=>setVocabAnswer(p=>p+l.toLowerCase())}
+                          style={{ background:cardBg, border:`1px solid ${borderColor}`, color:"#fff", fontSize:14, fontWeight:"bold", padding:"10px 0", borderRadius:8, cursor:"pointer", fontFamily:"inherit", minHeight:42, touchAction:"manipulation" }}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button onClick={()=>setVocabAnswer(p=>p.slice(0,-1))} style={{ flex:1, background:cardBg, border:`1px solid ${borderColor}`, color:"#ff6b35", fontSize:18, padding:"14px", borderRadius:10, cursor:"pointer", fontFamily:"inherit", minHeight:50 }}>⌫</button>
+                      <button onClick={()=>handleVocabAnswer(vocabAnswer)} disabled={!vocabAnswer} style={{ flex:2, background:vocabAnswer?vcolLight:"transparent", border:`2px solid ${vocabAnswer?vcol:borderColor}`, color:vocabAnswer?vcol:mutedColor, fontSize:14, letterSpacing:3, padding:"14px", borderRadius:10, cursor:vocabAnswer?"pointer":"default", fontFamily:"inherit", minHeight:50 }}>CHECK</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Feedback + Next */}
+            {vocabFeedback&&(
+              <div style={{ animation:"fadeInFast 0.3s ease" }}>
+                <div style={{ textAlign:"center", fontSize:14, letterSpacing:3, color:vocabFeedback==="correct"?"#00ff88":"#ff4466", marginBottom:12 }}>
+                  {vocabFeedback==="correct"?`✓ CORRECT${vocabStreak>1?` · ${vocabStreak}× STREAK`:""}`:`✗ WRONG — ANSWER: "${vocabQ.answer}"`}
+                </div>
+                {vocabSave.wrongWords[vocabQ.word.word]&&vocabFeedback==="correct"&&(
+                  <div style={{ textAlign:"center", fontSize:11, color:mutedColor, marginBottom:10 }}>
+                    Review progress: {vocabSave.wrongWords[vocabQ.word.word].correctStreak}/5 correct to master
+                  </div>
+                )}
+                {vocabFeedback==="correct"&&vocabSave.masteredWords.includes(vocabQ.word.word)&&(
+                  <div style={{ textAlign:"center", fontSize:13, color:"#ffcc00", marginBottom:10 }}>⭐ WORD MASTERED!</div>
+                )}
+                <button onClick={nextVocabQuestion} style={{ width:"100%", background:vocabFeedback==="correct"?`${vcol}18`:"#ff446618", border:`2px solid ${vocabFeedback==="correct"?vcol:"#ff4466"}`, color:vocabFeedback==="correct"?vcol:"#ff4466", padding:"16px", fontSize:14, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:54 }}>
+                  {vocabMode==="review"&&Object.keys(vocabSave.wrongWords).length===0?"✓ ALL MASTERED →":"NEXT →"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SUMMARY ── */}
+        {vocabScreen==="summary"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:24 }}>
+              <div style={{ fontSize:10, color:vcol, letterSpacing:6, marginBottom:8 }}>SESSION COMPLETE</div>
+              <h2 style={{ fontSize:40, color:"#fff", margin:"0 0 4px" }}>VOCAB DONE</h2>
+              <div style={{ fontSize:12, color:mutedColor, letterSpacing:3 }}>{VOCAB_MODES.find(m=>m.key===vocabMode)?.label}</div>
+            </div>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+              {[
+                { label:"SCORE", val:vocabScore, color:vcol },
+                { label:"ACCURACY", val:`${vocabTotal>0?Math.round(vocabCorrect/vocabTotal*100):0}%`, color:"#00ff88" },
+                { label:"STREAK", val:`×${vocabStreak}`, color:"#ffcc00" },
+                { label:"MASTERED", val:vocabSave.masteredWords.length, color:"#ff6b35" },
+              ].map(({label,val,color})=>(
+                <div key={label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"16px 14px", textAlign:"center" }}>
+                  <div style={{ fontSize:26, color, fontWeight:"bold" }}>{val}</div>
+                  <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginTop:4 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Session word log */}
+            {vocabSessionWords.length>0&&(
+              <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 16px", marginBottom:14, maxHeight:200, overflowY:"auto" }}>
+                <div style={{ fontSize:10, color:mutedColor, letterSpacing:3, marginBottom:10 }}>THIS SESSION</div>
+                {vocabSessionWords.map((w,i)=>(
+                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8, paddingBottom:8, borderBottom:i<vocabSessionWords.length-1?`1px solid ${borderColor}`:"none" }}>
+                    <div>
+                      <div style={{ fontSize:13, color:"#fff", fontWeight:"bold" }}>{w.word}</div>
+                      <div style={{ fontSize:10, color:mutedColor, marginTop:2 }}>{w.meaning.slice(0,40)}{w.meaning.length>40?"...":""}</div>
+                    </div>
+                    <span style={{ fontSize:18, color:w.correct?"#00ff88":"#ff4466" }}>{w.correct?"✓":"✗"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setVocabScreen("intro")} style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"16px", fontSize:13, letterSpacing:3, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:52 }}>CHANGE MODE</button>
+              <button onClick={startVocabGame} style={{ flex:2, background:"transparent", border:`2px solid ${vcol}`, color:vcol, padding:"16px", fontSize:13, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 16px ${vcol}44`, minHeight:52 }}>PLAY AGAIN</button>
+            </div>
+          </div>
+        )}
+
+        </div>
+      </div>
+    );
+  }
 
   // ── SUDOKU ──
   if (appMode==="sudoku") {
