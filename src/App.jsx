@@ -222,7 +222,7 @@ const VOCAB_MODES = [
 function getVocabPool(diff, cat, seenRecently) {
   let pool = VOCAB_WORDS.filter(w => {
     if (diff !== "all" && w.diff !== diff) return false;
-    if (cat !== "all" && !(w.cats||[w.cat||"everyday"]).includes(cat)) return false;
+    if (cat !== "all") { const wc = w.cats || (w.cat ? [w.cat] : ["everyday"]); if (!wc.includes(cat)) return false; }
     return true;
   });
   // Prefer unseen words
@@ -231,21 +231,32 @@ function getVocabPool(diff, cat, seenRecently) {
 }
 
 function makeVocabQuestion(word, mode, pool) {
+  if (!word || !mode) return null;
+  const ant = word.antonyms || [];
+  const syn = word.synonyms || [];
   if (mode === "word2meaning") {
     const wrongs = pool.filter(w => w.word !== word.word).sort(() => Math.random() - 0.5).slice(0, 3).map(w => w.meaning);
+    while (wrongs.length < 3) wrongs.push("none of the above");
     const choices = [...wrongs, word.meaning].sort(() => Math.random() - 0.5);
     return { type:"word2meaning", prompt: word.word, answer: word.meaning, choices, word };
   }
   if (mode === "meaning2word") {
     const wrongs = pool.filter(w => w.word !== word.word).sort(() => Math.random() - 0.5).slice(0, 3).map(w => w.word);
+    while (wrongs.length < 3) wrongs.push("—");
     const choices = [...wrongs, word.word].sort(() => Math.random() - 0.5);
     return { type:"meaning2word", prompt: word.meaning, answer: word.word, choices, word };
   }
   if (mode === "antonym") {
-    const correct = word.antonyms[0];
-    // Wrong antonyms from other words
-    const otherAntonyms = pool.filter(w => w.word !== word.word).flatMap(w => w.antonyms).filter(a => !word.antonyms.includes(a));
-    const wrongs = otherAntonyms.sort(() => Math.random() - 0.5).slice(0, 3);
+    if (ant.length === 0) {
+      // Fall back to word2meaning if no antonyms
+      const wrongs = pool.filter(w => w.word !== word.word).sort(() => Math.random() - 0.5).slice(0, 3).map(w => w.meaning);
+      const choices = [...wrongs, word.meaning].sort(() => Math.random() - 0.5);
+      return { type:"word2meaning", prompt: word.word, answer: word.meaning, choices, word };
+    }
+    const correct = ant[0];
+    const otherAntonyms = pool.filter(w => w.word !== word.word).flatMap(w => w.antonyms||[]).filter(a => !ant.includes(a));
+    const wrongs = [...new Set(otherAntonyms)].sort(() => Math.random() - 0.5).slice(0, 3);
+    while (wrongs.length < 3) wrongs.push(pool[Math.floor(Math.random()*pool.length)].word);
     const choices = [...wrongs, correct].sort(() => Math.random() - 0.5);
     return { type:"antonym", prompt: word.word, answer: correct, choices, word };
   }
@@ -718,28 +729,38 @@ export default function MathGame() {
     setVoiceStatus("");
   }
 
-  const loadVocabQuestion = useCallback((modeOverride, diffOverride, catOverride) => {
-    const mode = modeOverride || vocabMode;
-    const diff2 = diffOverride || vocabDiff;
-    const cat2 = catOverride || vocabCat;
+  const loadVocabQuestion = useCallback(() => {
     let pool;
-    if (mode === "review") {
+    if (vocabMode === "review") {
       pool = getWrongWordsPool();
-      if (pool.length === 0) { setVocabScreen("summary"); return; }
+      if (!pool || pool.length === 0) { setVocabScreen("summary"); return; }
     } else {
-      pool = getVocabPool(diff2, cat2, new Set());
-      if (!pool || pool.length === 0) {
-        pool = VOCAB_WORDS.filter(w => diff2 === "all" || w.diff === diff2);
+      // Filter by difficulty
+      pool = VOCAB_WORDS.filter(w => vocabDiff === "all" || w.diff === vocabDiff);
+      // Filter by category
+      if (vocabCat !== "all") {
+        const catFiltered = pool.filter(w => {
+          const wc = w.cats || (w.cat ? [w.cat] : ["everyday"]);
+          return wc.includes(vocabCat);
+        });
+        if (catFiltered.length >= 4) pool = catFiltered;
       }
-      if (!pool || pool.length === 0) pool = VOCAB_WORDS;
+      if (!pool || pool.length === 0) pool = [...VOCAB_WORDS];
     }
+    if (!pool || pool.length === 0) { setVocabScreen("summary"); return; }
     const word = pool[Math.floor(Math.random() * pool.length)];
-    const effectiveMode = mode === "review"
+    const effectiveMode = vocabMode === "review"
       ? ["word2meaning","meaning2word","antonym"][Math.floor(Math.random()*3)]
-      : mode;
-    const q = makeVocabQuestion(word, effectiveMode, VOCAB_WORDS);
-    if (!q) return;
-    setVocabQ(q);
+      : vocabMode;
+    const q = makeVocabQuestion(word, effectiveMode, pool.length >= 4 ? pool : VOCAB_WORDS);
+    if (!q) {
+      // Try again with word2meaning as safe fallback
+      const fallback = makeVocabQuestion(word, "word2meaning", VOCAB_WORDS);
+      if (!fallback) return;
+      setVocabQ(fallback);
+    } else {
+      setVocabQ(q);
+    }
     setVocabAnswer("");
     setVocabFeedback(null);
     setShowSentence(false);
@@ -1403,7 +1424,7 @@ export default function MathGame() {
                 {vocabQ.type==="word2meaning"?"WORD → MEANING":vocabQ.type==="meaning2word"?"MEANING → WORD":vocabQ.type==="antonym"?"ANTONYM":vocabQ.type==="spelling"?"SPELLING":"REVIEW"}
               </div>
               <div style={{ background:"transparent", border:`1px solid ${borderColor}`, borderRadius:20, padding:"4px 12px", fontSize:10, color:mutedColor }}>
-                {vocabQ.word.cat.toUpperCase()} · {vocabQ.word.diff.toUpperCase()}
+                {(vocabQ.word.cats?vocabQ.word.cats[0]:vocabQ.word.cat||"general").toUpperCase()} · {vocabQ.word.diff.toUpperCase()}
               </div>
               {vocabSave.wrongWords[vocabQ.word.word]&&(
                 <div style={{ background:"#ff446618", border:"1px solid #ff446644", borderRadius:20, padding:"4px 12px", fontSize:10, color:"#ff4466" }}>
