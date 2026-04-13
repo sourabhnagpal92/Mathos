@@ -718,28 +718,32 @@ export default function MathGame() {
     setVoiceStatus("");
   }
 
-  function loadVocabQuestion() {
+  const loadVocabQuestion = useCallback((modeOverride, diffOverride, catOverride) => {
+    const mode = modeOverride || vocabMode;
+    const diff2 = diffOverride || vocabDiff;
+    const cat2 = catOverride || vocabCat;
     let pool;
-    if (vocabMode === "review") {
+    if (mode === "review") {
       pool = getWrongWordsPool();
       if (pool.length === 0) { setVocabScreen("summary"); return; }
     } else {
-      pool = getVocabPool(vocabDiff, vocabCat, vocabRecentSeen);
-      if (pool.length < 4) {
-        // Reset seen if pool too small
-        setVocabRecentSeen(new Set());
-        pool = getVocabPool(vocabDiff, vocabCat, new Set());
+      pool = getVocabPool(diff2, cat2, new Set());
+      if (!pool || pool.length === 0) {
+        pool = VOCAB_WORDS.filter(w => diff2 === "all" || w.diff === diff2);
       }
+      if (!pool || pool.length === 0) pool = VOCAB_WORDS;
     }
     const word = pool[Math.floor(Math.random() * pool.length)];
-    const effectiveMode = vocabMode === "review" ? ["word2meaning","meaning2word","antonym"][Math.floor(Math.random()*3)] : vocabMode;
+    const effectiveMode = mode === "review"
+      ? ["word2meaning","meaning2word","antonym"][Math.floor(Math.random()*3)]
+      : mode;
     const q = makeVocabQuestion(word, effectiveMode, VOCAB_WORDS);
+    if (!q) return;
     setVocabQ(q);
     setVocabAnswer("");
     setVocabFeedback(null);
     setShowSentence(false);
-    setVocabRecentSeen(prev => { const n = new Set(prev); n.add(word.word); if(n.size>20){const f=n.values().next().value;n.delete(f);} return n; });
-  }
+  }, [vocabMode, vocabDiff, vocabCat]);
 
   function handleVocabAnswer(chosen) {
     if (vocabFeedback) return;
@@ -774,7 +778,7 @@ export default function MathGame() {
       setVocabScreen("summary");
     } else {
       setVocabQIdx(next);
-      loadVocabQuestion();
+      setVocabQ(null); // null triggers useEffect → loadVocabQuestion
     }
   }
 
@@ -782,8 +786,8 @@ export default function MathGame() {
     setVocabScore(0); setVocabStreak(0); setVocabTotal(0); setVocabCorrect(0);
     setVocabSessionWords([]); setVocabQIdx(0); setVocabFeedback(null);
     setVocabSessionStart(Date.now()); setVocabXpEarned(0);
+    setVocabQ(null); // clear old question
     setVocabScreen("game");
-    // loadVocabQuestion called via useEffect
   }
 
   function handleStart() {
@@ -825,8 +829,12 @@ export default function MathGame() {
   // ── Load question on game start ──
   useEffect(() => { if (screen==="game") loadQuestion(levelIdx); }, [screen,levelIdx]);
 
-  // ── Load vocab question when vocab game starts ──
-  useEffect(() => { if (appMode==="vocab" && vocabScreen==="game") loadVocabQuestion(); }, [vocabScreen, appMode]);
+  // ── Load vocab question when vocab game starts or question is null ──
+  useEffect(() => {
+    if (appMode==="vocab" && vocabScreen==="game" && !vocabQ) {
+      loadVocabQuestion();
+    }
+  }, [appMode, vocabScreen, vocabQ, loadVocabQuestion]);
 
   // ── Race question ──
   const [raceCurrent, setRaceCurrent] = useState(null);
@@ -1383,6 +1391,7 @@ export default function MathGame() {
         )}
 
         {/* ── GAME ── */}
+        {vocabScreen==="game"&&!vocabQ&&(<div style={{textAlign:"center",padding:"60px 20px",color:"#a78bfa",letterSpacing:3,fontSize:14}}>LOADING...</div>)}
         {vocabScreen==="game"&&vocabQ&&(
           <div style={{ animation:"fadeIn 0.3s ease" }}>
             {/* HUD */}
