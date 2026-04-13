@@ -509,7 +509,7 @@ export default function MathGame() {
   const [vocabXpEarned, setVocabXpEarned] = useState(0);
   const [onboardStep, setOnboardStep] = useState(0);
   const [onboardName, setOnboardName] = useState("");
-  const [showOnboard, setShowOnboard] = useState(!vocabSave.onboarded);
+  const [showOnboard, setShowOnboard] = useState(false); // only show when user triggers it
   const [playerName, setPlayerName] = useState(vocabSave.userName||"");
   const [showSettings, setShowSettings] = useState(false);
   const [showReset, setShowReset] = useState(false);
@@ -1099,78 +1099,62 @@ export default function MathGame() {
   const panelStyle = { background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"16px 20px", marginBottom:12 };
 
 
-  // ── ONBOARDING ──
-  if (showOnboard) {
-    const vcol="#a78bfa";
-    const steps = [
-      { title:"Welcome!", sub:"Let's set you up", icon:"👋" },
-      { title:"Your Name", sub:"What should we call you?", icon:"✏️" },
-      { title:"Start Difficulty", sub:"You can change this anytime", icon:"🎯" },
-    ];
-    return (
-      <div style={{ minHeight:"100vh", background:"#050a0f", fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}>
-        <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}`}</style>
-        <div style={{ width:"100%", maxWidth:420, animation:"fadeIn 0.5s ease" }}>
-          <div style={{ textAlign:"center", marginBottom:32 }}>
-            <div style={{ fontSize:56, marginBottom:12 }}>{steps[onboardStep].icon}</div>
-            <h2 style={{ fontSize:28, color:"#fff", margin:"0 0 6px", letterSpacing:2 }}>{steps[onboardStep].title}</h2>
-            <div style={{ color:"#4a6070", fontSize:13, letterSpacing:2 }}>{steps[onboardStep].sub}</div>
-          </div>
-
-          {/* Step indicators */}
-          <div style={{ display:"flex", gap:8, justifyContent:"center", marginBottom:32 }}>
-            {steps.map((_,i)=><div key={i} style={{ width:i===onboardStep?24:8, height:8, borderRadius:4, background:i===onboardStep?"#00ff88":i<onboardStep?"#00ff8844":"#1a3040", transition:"all 0.3s" }} />)}
-          </div>
-
-          {onboardStep===0&&(
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:24, color:"#00ff88", marginBottom:16, letterSpacing:3 }}>MATH_OS</div>
-              <div style={{ color:"#4a6070", fontSize:13, lineHeight:1.8, marginBottom:24 }}>
-                Your personal training system for<br/>
-                <span style={{color:"#fff"}}>Math · Vocabulary · Logic</span><br/>
-                with XP, streaks, and progress tracking.
-              </div>
-              <button onClick={()=>setOnboardStep(1)} style={{ width:"100%", background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"18px", fontSize:15, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:58 }}>GET STARTED →</button>
-            </div>
-          )}
-
-          {onboardStep===1&&(
-            <div>
-              <input value={onboardName} onChange={e=>setOnboardName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&onboardName.trim()&&setOnboardStep(2)} placeholder="Enter your name..." maxLength={20}
-                style={{ width:"100%", boxSizing:"border-box", background:"#0a1520", border:"1px solid #1a3040", color:"#fff", padding:"18px 16px", fontSize:20, letterSpacing:2, borderRadius:10, fontFamily:"inherit", outline:"none", marginBottom:16, textAlign:"center" }} autoFocus />
-              <button onClick={()=>onboardName.trim()&&setOnboardStep(2)} disabled={!onboardName.trim()} style={{ width:"100%", background:onboardName.trim()?"transparent":"#050a0f", border:`2px solid ${onboardName.trim()?"#00ff88":"#1a3040"}`, color:onboardName.trim()?"#00ff88":"#2a4050", padding:"18px", fontSize:15, letterSpacing:4, cursor:onboardName.trim()?"pointer":"default", borderRadius:10, fontFamily:"inherit", minHeight:58 }}>NEXT →</button>
-            </div>
-          )}
-
-          {onboardStep===2&&(
-            <div>
-              <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-                {[{k:"easy",label:"EASY",desc:"Start simple — build confidence",col:"#00ff88"},{k:"medium",label:"MEDIUM",desc:"Balanced challenge — most popular",col:"#ffcc00"},{k:"hard",label:"HARD",desc:"Maximum challenge — expert level",col:"#ff4466"}].map(d=>(
-                  <button key={d.k} onClick={()=>{setDifficulty(d.k);}} style={{ background:difficulty===d.k?`${d.col}18`:"transparent", border:`2px solid ${difficulty===d.k?d.col:"#1a3040"}`, borderRadius:10, padding:"16px 20px", cursor:"pointer", fontFamily:"inherit", textAlign:"left", display:"flex", alignItems:"center", gap:14 }}>
-                    <div style={{ width:12, height:12, borderRadius:"50%", background:d.col, flexShrink:0 }} />
-                    <div>
-                      <div style={{ fontSize:13, color:difficulty===d.k?d.col:"#fff", letterSpacing:2 }}>{d.label}</div>
-                      <div style={{ fontSize:11, color:"#4a6070", marginTop:2 }}>{d.desc}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <button onClick={()=>{
-                vocabSave.onboarded=true; vocabSave.userName=onboardName.trim()||"Player"; vocabSave.preferredDiff=difficulty;
-                writeVocabSave(vocabSave); setPlayerName(onboardName.trim()||"Player"); setShowOnboard(false);
-              }} style={{ width:"100%", background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"18px", fontSize:15, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:58 }}>LET'S GO →</button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ── HOME ──
+    // ── HOME ──
   if (appMode==="home") return (
     <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 16px", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ position:"fixed",inset:0,opacity:theme==="dark"?0.04:0.02, backgroundImage:"linear-gradient(#00ff88 1px,transparent 1px),linear-gradient(90deg,#00ff88 1px,transparent 1px)", backgroundSize:"40px 40px", pointerEvents:"none" }} />
       <style>{`@keyframes glitch{0%,100%{transform:translate(0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,2px)}80%{transform:translate(1px,-2px)}} @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes pop{0%{transform:scale(0);opacity:1}100%{transform:scale(2.5) translateY(-50px);opacity:0}}`}</style>
+      {/* Onboarding overlay */}
+      {showOnboard&&(
+        <div style={{ position:"fixed",inset:0,background:"#050a0f",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px" }}>
+          <div style={{ width:"100%",maxWidth:420,animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center",marginBottom:28 }}>
+              <div style={{ fontSize:52,marginBottom:10 }}>{["👋","✏️","🎯"][onboardStep]}</div>
+              <h2 style={{ fontSize:26,color:"#fff",margin:"0 0 6px",letterSpacing:2 }}>{["Welcome!","Your Name","Difficulty"][onboardStep]}</h2>
+              <div style={{ color:"#4a6070",fontSize:12,letterSpacing:2 }}>{["Let's personalise your experience","What should we call you?","You can change this anytime"][onboardStep]}</div>
+            </div>
+            <div style={{ display:"flex",gap:8,justifyContent:"center",marginBottom:28 }}>
+              {[0,1,2].map(i=><div key={i} style={{ width:i===onboardStep?24:8,height:8,borderRadius:4,background:i===onboardStep?"#00ff88":i<onboardStep?"#00ff8844":"#1a3040",transition:"all 0.3s" }} />)}
+            </div>
+            {onboardStep===0&&(
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:22,color:"#00ff88",marginBottom:12,letterSpacing:3 }}>MATH_OS</div>
+                <div style={{ color:"#4a6070",fontSize:12,lineHeight:1.9,marginBottom:24 }}>Math · Vocabulary · Logic<br/><span style={{color:"#fff"}}>XP · Streaks · Progress tracking</span></div>
+                <button onClick={()=>setOnboardStep(1)} style={{ width:"100%",background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"16px",fontSize:14,letterSpacing:4,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:54 }}>GET STARTED →</button>
+              </div>
+            )}
+            {onboardStep===1&&(
+              <div>
+                <input value={onboardName} onChange={e=>setOnboardName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&onboardName.trim())setOnboardStep(2);}} placeholder="Your name..." maxLength={20}
+                  style={{ width:"100%",boxSizing:"border-box",background:"#0a1520",border:"1px solid #1a3040",color:"#fff",padding:"16px",fontSize:18,letterSpacing:2,borderRadius:10,fontFamily:"inherit",outline:"none",marginBottom:12,textAlign:"center" }} />
+                <button onClick={()=>onboardName.trim()&&setOnboardStep(2)} style={{ width:"100%",background:onboardName.trim()?"transparent":"#050a0f",border:`2px solid ${onboardName.trim()?"#00ff88":"#1a3040"}`,color:onboardName.trim()?"#00ff88":"#2a4050",padding:"16px",fontSize:14,letterSpacing:4,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:54 }}>NEXT →</button>
+                <button onClick={()=>{setShowOnboard(false);}} style={{ width:"100%",marginTop:8,background:"transparent",border:"none",color:"#2a4050",padding:"10px",fontSize:11,cursor:"pointer",fontFamily:"inherit" }}>Skip for now</button>
+              </div>
+            )}
+            {onboardStep===2&&(
+              <div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
+                  {[{k:"easy",l:"EASY",d:"Start simple",c:"#00ff88"},{k:"medium",l:"MEDIUM",d:"Balanced challenge",c:"#ffcc00"},{k:"hard",l:"HARD",d:"Maximum challenge",c:"#ff4466"}].map(d=>(
+                    <button key={d.k} onClick={()=>setDifficulty(d.k)} style={{ background:difficulty===d.k?`${d.c}18`:"transparent",border:`2px solid ${difficulty===d.k?d.c:"#1a3040"}`,borderRadius:10,padding:"14px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"left",display:"flex",alignItems:"center",gap:12 }}>
+                      <div style={{ width:10,height:10,borderRadius:"50%",background:d.c,flexShrink:0 }} />
+                      <div><div style={{ fontSize:13,color:difficulty===d.k?d.c:"#fff",letterSpacing:2 }}>{d.l}</div><div style={{ fontSize:10,color:"#4a6070",marginTop:2 }}>{d.d}</div></div>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={()=>{
+                  vocabSave.onboarded=true;
+                  vocabSave.userName=onboardName.trim()||"Player";
+                  vocabSave.preferredDiff=difficulty;
+                  writeVocabSave(vocabSave);
+                  setPlayerName(onboardName.trim()||"Player");
+                  setShowOnboard(false);
+                }} style={{ width:"100%",background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"16px",fontSize:14,letterSpacing:4,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:54 }}>LET'S GO →</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div style={{ textAlign:"center", animation:"fadeIn 0.6s ease", maxWidth:480, width:"100%", paddingTop:"max(env(safe-area-inset-top), 40px)", paddingBottom:"max(env(safe-area-inset-bottom), 32px)" }}>
         <div style={{ fontSize:10, letterSpacing:6, color:"#00ff88", marginBottom:8, opacity:0.6 }}>{playerName ? `WELCOME BACK, ${playerName.toUpperCase()}` : "SELECT MODULE"}</div>
         <h1 style={{ fontSize:"clamp(44px,11vw,72px)", color:textColor, margin:"0 0 4px", textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844", animation:"glitch 3s infinite", letterSpacing:3 }}>MATH<span style={{color:"#00ff88"}}>_</span>OS</h1>
