@@ -848,7 +848,7 @@ export default function MathGame() {
   }, [appMode,sudokuComplete]);
 
   // ── Load question on game start ──
-  useEffect(() => { if (screen==="game") loadQuestion(levelIdx); }, [screen,levelIdx]);
+  useEffect(() => { if (screen==="game") loadQuestion(levelIdx); }, [screen,levelIdx,loadQuestion]);
 
   // ── Load vocab question when vocab game starts or question is null ──
   useEffect(() => {
@@ -978,7 +978,14 @@ export default function MathGame() {
     }
   }
 
-  function nextLevel() { const nl=levelIdx+1; setLevelIdx(nl); setQIdx(0); setScreen("game"); }
+  function nextLevel() {
+    const nl = levelIdx + 1;
+    setLevelIdx(nl);
+    setQIdx(0);
+    setScreen("game");
+    // Directly load question for new level to avoid stale closure in useEffect
+    setTimeout(() => loadQuestion(nl), 50);
+  }
 
   function restart() {
     setLevelIdx(0);setQIdx(0);setScore(0);setStreak(0);setMaxStreak(0);
@@ -1122,13 +1129,13 @@ export default function MathGame() {
 
     // ── HOME ──
   if (appMode==="home") return (
-    <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 16px", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+    <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ position:"fixed",inset:0,opacity:theme==="dark"?0.04:0.02, backgroundImage:"linear-gradient(#00ff88 1px,transparent 1px),linear-gradient(90deg,#00ff88 1px,transparent 1px)", backgroundSize:"40px 40px", pointerEvents:"none" }} />
       <style>{`@keyframes glitch{0%,100%{transform:translate(0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,2px)}80%{transform:translate(1px,-2px)}} @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes pop{0%{transform:scale(0);opacity:1}100%{transform:scale(2.5) translateY(-50px);opacity:0}}`}</style>
       {/* Onboarding overlay */}
       {showOnboard&&(
         <div style={{ position:"fixed",inset:0,background:"#050a0f",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px" }}>
-          <div style={{ width:"100%",maxWidth:420,animation:"fadeIn 0.5s ease" }}>
+          <div style={{ width:"100%",maxWidth:"min(420px,100%)",animation:"fadeIn 0.5s ease" }}>
             <div style={{ textAlign:"center",marginBottom:28 }}>
               <div style={{ fontSize:52,marginBottom:10 }}>{["👋","✏️","🎯"][onboardStep]}</div>
               <h2 style={{ fontSize:26,color:"#fff",margin:"0 0 6px",letterSpacing:2 }}>{["Welcome!","Your Name","Difficulty"][onboardStep]}</h2>
@@ -1176,7 +1183,7 @@ export default function MathGame() {
         </div>
       )}
 
-      <div style={{ textAlign:"center", animation:"fadeIn 0.6s ease", maxWidth:480, width:"100%", paddingTop:"max(env(safe-area-inset-top), 40px)", paddingBottom:"max(env(safe-area-inset-bottom), 32px)" }}>
+      <div style={{ textAlign:"center", animation:"fadeIn 0.6s ease", maxWidth:"min(480px,100%)", width:"100%", paddingTop:"max(env(safe-area-inset-top), 40px)", paddingBottom:"max(env(safe-area-inset-bottom), 32px)" }}>
         <div style={{ fontSize:10, letterSpacing:6, color:"#00ff88", marginBottom:8, opacity:0.6 }}>{playerName ? `WELCOME BACK, ${playerName.toUpperCase()}` : "SELECT MODULE"}</div>
         <h1 style={{ fontSize:"clamp(44px,11vw,72px)", color:textColor, margin:"0 0 4px", textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844", animation:"glitch 3s infinite", letterSpacing:3 }}>MATH<span style={{color:"#00ff88"}}>_</span>OS</h1>
         <div style={{ color:"#00ff88", fontSize:13, letterSpacing:5, marginBottom:24, opacity:0.7 }}>COGNITIVE TRAINING SYSTEM v3.0</div>
@@ -1205,21 +1212,21 @@ export default function MathGame() {
         </div>
 
         <div style={{ display:"flex", flexDirection:"column", gap:14, marginBottom:24 }}>
-          <button onClick={()=>{setAppMode("math");setScreen("intro");}} style={{ background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"28px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00ff8844", transition:"all 0.2s", minHeight:100 }}
+          <button onClick={()=>{setAppMode("math");setScreen("intro");}} style={{ background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"clamp(20px,5vw,28px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00ff8844", transition:"all 0.2s", minHeight:"clamp(85px,22vw,100px)" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00ff8818";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
             <div style={{ fontSize:36, marginBottom:8 }}>🧮</div>
             <div>MATH TRAINING</div>
             <div style={{ fontSize:11, color:"#00ff8899", marginTop:4, letterSpacing:1 }}>Arithmetic · Algebra · Advanced · Audio · Drill · Review</div>
           </button>
-          <button onClick={()=>startSudoku()} style={{ background:"transparent", border:"2px solid #00cfff", color:"#00cfff", padding:"24px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00cfff44", transition:"all 0.2s", minHeight:90 }}
+          <button onClick={()=>startSudoku()} style={{ background:"transparent", border:"2px solid #00cfff", color:"#00cfff", padding:"clamp(18px,4.5vw,24px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00cfff44", transition:"all 0.2s", minHeight:"clamp(78px,20vw,90px)" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00cfff18";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
             <div style={{ fontSize:32, marginBottom:8 }}>🔢</div>
             <div>SUDOKU</div>
             <div style={{ fontSize:11, color:"#00cfff99", marginTop:4, letterSpacing:1 }}>Logic · Pattern · Deduction</div>
           </button>
-          <button onClick={()=>{setAppMode("vocab");setVocabScreen("intro");}} style={{ background:"transparent", border:"2px solid #a78bfa", color:"#a78bfa", padding:"24px 20px", fontSize:15, letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #a78bfa44", transition:"all 0.2s", minHeight:90 }}
+          <button onClick={()=>{setAppMode("vocab");setVocabScreen("intro");}} style={{ background:"transparent", border:"2px solid #a78bfa", color:"#a78bfa", padding:"clamp(18px,4.5vw,24px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #a78bfa44", transition:"all 0.2s", minHeight:"clamp(78px,20vw,90px)" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#a78bfa18";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
             <div style={{ fontSize:32, marginBottom:8 }}>📚</div>
@@ -1290,7 +1297,7 @@ export default function MathGame() {
     const isSpelling = vocabQ?.type === "spelling";
 
     return (
-      <div style={{ minHeight:"100vh", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 16px", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+      <div style={{ minHeight:"100vh", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
         <style>{`
           @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
           @keyframes fadeInFast{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
@@ -1302,7 +1309,7 @@ export default function MathGame() {
         `}</style>
 
         {/* Header */}
-        <div style={{ width:"100%", maxWidth:480, paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
             <button onClick={()=>setAppMode("home")} style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", minHeight:44 }}>← HOME</button>
             <div style={{ textAlign:"center" }}>
@@ -1315,7 +1322,7 @@ export default function MathGame() {
           </div>
         </div>
 
-        <div style={{ width:"100%", maxWidth:480, paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
 
         {/* ── INTRO ── */}
         {vocabScreen==="intro"&&(
@@ -1438,7 +1445,7 @@ export default function MathGame() {
               <div style={{ fontSize:10, color:mutedColor, letterSpacing:3, marginBottom:12 }}>
                 {vocabQ.type==="word2meaning"?"WHAT DOES THIS WORD MEAN?":vocabQ.type==="meaning2word"?"WHICH WORD MATCHES THIS MEANING?":vocabQ.type==="antonym"?"WHAT IS THE ANTONYM OF...":vocabQ.type==="spelling"?"SPELL THE WORD FOR THIS MEANING:":"IDENTIFY THIS WORD"}
               </div>
-              <div style={{ fontSize:"clamp(20px,5vw,36px)", color:"#fff", fontWeight:"bold", letterSpacing:2, lineHeight:1.3 }}>{vocabQ.prompt}</div>
+              <div style={{ fontSize:"clamp(18px,5.5vw,34px)", color:"#fff", fontWeight:"bold", letterSpacing:2, lineHeight:1.3 }}>{vocabQ.prompt}</div>
               {(vocabQ.type==="word2meaning"||vocabQ.type==="antonym")&&(
                 <div style={{ marginTop:8, display:"flex", gap:10, justifyContent:"center", alignItems:"center", flexWrap:"wrap" }}>
                   <span style={{ fontSize:13, color:"#a78bfa99", letterSpacing:1 }}>{vocabQ.word.phonetic}</span>
@@ -1611,11 +1618,11 @@ export default function MathGame() {
   if (appMode==="sudoku") {
     const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
     return (
-      <div style={{ height:"100vh", height:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 12px", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+      <div style={{ height:"100vh", height:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(10px,3vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
         <style>{`@keyframes pop{0%{transform:scale(0);opacity:1}100%{transform:scale(2.5) translateY(-50px);opacity:0}} @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}`}</style>
         {particles.map(p=>(<div key={p.id} style={{ position:"fixed",left:`${p.x}%`,top:`${p.y}%`,width:8,height:8,borderRadius:"50%",background:p.color,boxShadow:`0 0 10px ${p.color}`,pointerEvents:"none",zIndex:50,animation:"pop 1s ease-out forwards" }} />))}
 
-        <div style={{ width:"100%", maxWidth:430, paddingTop:"max(env(safe-area-inset-top), 16px)", paddingBottom:"max(env(safe-area-inset-bottom), 20px)" }}>
+        <div style={{ width:"100%", maxWidth:"min(430px,100%)", paddingTop:"max(env(safe-area-inset-top), 16px)", paddingBottom:"max(env(safe-area-inset-bottom), 20px)" }}>
           {/* Header */}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
             <button onClick={()=>setAppMode("home")} style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", letterSpacing:2, minHeight:44 }}>← HOME</button>
@@ -1672,7 +1679,7 @@ export default function MathGame() {
           {/* Number pad */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(9,1fr)", gap:5, marginBottom:14 }}>
             {[1,2,3,4,5,6,7,8,9].map(n=>(
-              <button key={n} onClick={()=>handleSudokuInput(String(n))} style={{ background:cardBg, border:`1px solid ${borderColor}`, color:textColor, padding:"0", fontSize:18, cursor:"pointer", borderRadius:8, fontFamily:"inherit", transition:"all 0.15s", minHeight:44, display:"flex", alignItems:"center", justifyContent:"center", touchAction:"manipulation" }}
+              <button key={n} onClick={()=>handleSudokuInput(String(n))} style={{ background:cardBg, border:`1px solid ${borderColor}`, color:textColor, padding:"0", fontSize:"clamp(15px,4.5vw,18px)", cursor:"pointer", borderRadius:8, fontFamily:"inherit", transition:"all 0.15s", minHeight:"clamp(38px,10vw,44px)", display:"flex", alignItems:"center", justifyContent:"center", touchAction:"manipulation" }}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor="#00cfff";e.currentTarget.style.color="#00cfff";}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor=borderColor;e.currentTarget.style.color=textColor;}}>{n}</button>
             ))}
@@ -1712,7 +1719,7 @@ export default function MathGame() {
 
   // ── MATH SCREENS ──
   return (
-    <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 16px", position:"relative", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+    <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", position:"relative", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ position:"fixed",inset:0,opacity:theme==="dark"?0.04:0.02,backgroundImage:"linear-gradient(#00ff88 1px,transparent 1px),linear-gradient(90deg,#00ff88 1px,transparent 1px)",backgroundSize:"40px 40px",pointerEvents:"none" }} />
       <style>{`
         @keyframes pop{0%{transform:scale(0) translateY(0);opacity:1}100%{transform:scale(2.5) translateY(-60px);opacity:0}}
@@ -1722,6 +1729,8 @@ export default function MathGame() {
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
         @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
         input[type=number]{-moz-appearance:textfield;} input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;} *{-webkit-tap-highlight-color:transparent;touch-action:manipulation;} body{overscroll-behavior:none;}
+        :root{--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);--safe-right:env(safe-area-inset-right,0px);}
+        .fluid-container{width:100%;max-width:min(480px,100%);padding-left:max(12px,3.5vw);padding-right:max(12px,3.5vw);}
         @keyframes celebrate{0%{transform:scale(1)}50%{transform:scale(1.1)}100%{transform:scale(1)}}
         .cbtn{transition:all 0.15s;cursor:pointer;} .cbtn:hover{transform:translateX(5px) scale(1.02)!important;filter:brightness(1.3);}
         .type-input:focus{outline:none;} ::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-track{background:#0a1520;} ::-webkit-scrollbar-thumb{background:#1a3040;}
@@ -1747,7 +1756,7 @@ export default function MathGame() {
 
       {/* ── INTRO ── */}
       {screen==="intro"&&(
-        <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:430,width:"100%", paddingTop:"max(env(safe-area-inset-top),50px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+        <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:"min(430px,100%)",width:"100%", paddingTop:"max(env(safe-area-inset-top),50px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
           <div style={{ fontSize:10,letterSpacing:6,color:"#00ff88",marginBottom:6,opacity:0.6 }}>MATH TRAINING</div>
           <h1 style={{ fontSize:"clamp(42px,10vw,68px)",color:textColor,margin:"0 0 4px",textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844",animation:"glitch 3s infinite",letterSpacing:3 }}>MATH<span style={{color:"#00ff88"}}>_</span>OS</h1>
           <div style={{ color:"#00ff88",fontSize:12,letterSpacing:5,marginBottom:14,opacity:0.7 }}>COGNITIVE TRAINING SYSTEM</div>
@@ -1863,7 +1872,7 @@ export default function MathGame() {
           )}
 
           <div style={{ color:mutedColor,fontSize:9,marginBottom:18,letterSpacing:1 }}>🔥 DAILY STREAK: {dailyStreak.count} DAYS · ❤️ 3 LIVES PER ROUND</div>
-          <button onClick={handleStart} style={{ background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"18px 48px",fontSize:16,letterSpacing:5,cursor:"pointer",borderRadius:8,fontFamily:"inherit",boxShadow:"0 0 20px #00ff8844",transition:"all 0.2s",width:"100%",minHeight:58,touchAction:"manipulation" }}
+          <button onClick={handleStart} style={{ background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"clamp(14px,4vw,18px) 48px",fontSize:"clamp(13px,3.5vw,16px)",letterSpacing:5,cursor:"pointer",borderRadius:8,fontFamily:"inherit",boxShadow:"0 0 20px #00ff8844",transition:"all 0.2s",width:"100%",minHeight:"clamp(50px,13vw,58px)",touchAction:"manipulation" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00ff8818";e.currentTarget.style.boxShadow="0 0 32px #00ff8877";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.boxShadow="0 0 20px #00ff8844";}}>[ INITIALIZE ]</button>
         </div>
@@ -1871,7 +1880,7 @@ export default function MathGame() {
 
       {/* ── GAME ── */}
       {screen==="game"&&current&&(
-        <div style={{ width:"100%",maxWidth:430,animation:"fadeIn 0.3s ease", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),24px)" }}>
+        <div style={{ width:"100%",maxWidth:"min(430px,100%)",animation:"fadeIn 0.3s ease", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),24px)" }}>
           {/* HUD */}
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
             <div>
@@ -1880,7 +1889,7 @@ export default function MathGame() {
             </div>
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:11,color:mutedColor,letterSpacing:3,marginBottom:2 }}>SCORE</div>
-              <div style={{ fontSize:24,color:textColor,letterSpacing:2 }}>{score.toString().padStart(6,"0")}</div>
+              <div style={{ fontSize:"clamp(20px,5.5vw,28px)",color:textColor,letterSpacing:2 }}>{score.toString().padStart(6,"0")}</div>
             </div>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontSize:11,color:mutedColor,letterSpacing:3,marginBottom:2 }}>LIVES</div>
@@ -1941,7 +1950,7 @@ export default function MathGame() {
               </div>
             ) : (
               <>
-                <div style={{ fontSize:"clamp(32px,8vw,56px)",color:textColor,letterSpacing:3,textShadow:`0 0 20px ${level.color}55` }}>{current.question}</div>
+                <div style={{ fontSize:"clamp(28px,7.5vw,52px)",color:textColor,letterSpacing:3,textShadow:`0 0 20px ${level.color}55` }}>{current.question}</div>
                 {showHint&&current.steps&&!isAudio&&<div style={{ marginTop:12,fontSize:10,color:mutedColor,borderTop:`1px solid ${borderColor}`,paddingTop:10 }}>💡 {current.steps[0]}</div>}
               </>
             )}
@@ -1964,7 +1973,7 @@ export default function MathGame() {
                 const hidden=hiddenChoices.includes(c)&&!isCorrectAns;
                 let cbg=cardBg,cborder=borderColor,cc=mutedColor;
                 if (feedback) { if(isCorrectAns){cbg=`${level.color}18`;cborder=level.color;cc=level.color;} else if(selectedIdx===i){cbg="#ff446614";cborder="#ff4466";cc="#ff4466";} }
-                return (<button key={i} className="cbtn" onClick={()=>!hidden&&handleAnswer(i,c)} style={{ background:cbg,border:`1px solid ${cborder}`,color:hidden?"#1a3040":"#ffffff",fontWeight:"bold",padding:"20px 8px",fontSize:22,letterSpacing:2,borderRadius:12,cursor:feedback||hidden?"default":"pointer",boxShadow:feedback&&isCorrectAns?`0 0 16px ${level.color}44`:"none",fontFamily:"inherit",transition:"all 0.2s",opacity:hidden?0.2:1,minHeight:70,touchAction:"manipulation" }}>{hidden?"—":c}</button>);
+                return (<button key={i} className="cbtn" onClick={()=>!hidden&&handleAnswer(i,c)} style={{ background:cbg,border:`1px solid ${cborder}`,color:hidden?"#1a3040":"#ffffff",fontWeight:"bold",padding:"clamp(14px,4vw,20px) 8px",fontSize:"clamp(18px,5vw,22px)",letterSpacing:2,borderRadius:12,cursor:feedback||hidden?"default":"pointer",boxShadow:feedback&&isCorrectAns?`0 0 16px ${level.color}44`:"none",fontFamily:"inherit",transition:"all 0.2s",opacity:hidden?0.2:1,minHeight:"clamp(58px,16vw,70px)",touchAction:"manipulation" }}>{hidden?"—":c}</button>);
               })}
             </div>
           )}
@@ -1981,7 +1990,7 @@ export default function MathGame() {
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
                   {[1,2,3,4,5,6,7,8,9].map(n=>(
                     <button key={n} onClick={()=>setTypedAnswer(p=>p+String(n))}
-                      style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#fff",fontSize:26,fontWeight:"bold",padding:"18px 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:64,touchAction:"manipulation",transition:"all 0.1s" }}
+                      style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#fff",fontSize:"clamp(20px,6vw,26px)",fontWeight:"bold",padding:"clamp(14px,4vw,18px) 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:"clamp(52px,15vw,64px)",touchAction:"manipulation",transition:"all 0.1s" }}
                       onTouchStart={e=>e.currentTarget.style.background=level.color+"33"}
                       onTouchEnd={e=>e.currentTarget.style.background=cardBg}>
                       {n}
@@ -1991,7 +2000,7 @@ export default function MathGame() {
                   <button onClick={()=>setTypedAnswer(p=>p.slice(0,-1))}
                     style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#ff6b35",fontSize:22,padding:"18px 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:64,touchAction:"manipulation" }}>⌫</button>
                   <button onClick={()=>setTypedAnswer(p=>p+"0")}
-                    style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#fff",fontSize:26,fontWeight:"bold",padding:"18px 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:64,touchAction:"manipulation" }}>0</button>
+                    style={{ background:cardBg,border:`1px solid ${borderColor}`,color:"#fff",fontSize:"clamp(20px,6vw,26px)",fontWeight:"bold",padding:"clamp(14px,4vw,18px) 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minHeight:"clamp(52px,15vw,64px)",touchAction:"manipulation" }}>0</button>
                   <button onClick={handleTypedSubmit} disabled={!typedAnswer||!!feedback}
                     style={{ background:typedAnswer?"#00ff8820":"transparent",border:`2px solid ${typedAnswer?"#00ff88":borderColor}`,color:typedAnswer?"#00ff88":mutedColor,fontSize:16,fontWeight:"bold",letterSpacing:2,padding:"18px 0",borderRadius:12,cursor:typedAnswer?"pointer":"default",fontFamily:"inherit",minHeight:64,touchAction:"manipulation" }}>GO</button>
                 </div>
@@ -2047,7 +2056,7 @@ export default function MathGame() {
 
       {/* ── LEVEL UP ── */}
       {screen==="levelup"&&(
-        <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:430,width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+        <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:"min(430px,100%)",width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
           <div style={{ fontSize:10,color:"#ffcc00",letterSpacing:6,marginBottom:8 }}>LEVEL COMPLETE</div>
           <h2 style={{ fontSize:44,color:textColor,margin:"0 0 6px",textShadow:`0 0 30px ${level.color}` }}>{LEVELS[levelIdx].name}</h2>
           <div style={{ color:level.color,fontSize:14,letterSpacing:4,marginBottom:20 }}>CLEARED</div>
@@ -2070,7 +2079,7 @@ export default function MathGame() {
 
       {/* ── WIN ── */}
       {screen==="win"&&(
-        <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:430,width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+        <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:"min(430px,100%)",width:"100%", paddingTop:"max(env(safe-area-inset-top),52px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
           <div style={{ fontSize:10,letterSpacing:6,color:"#00ff88",marginBottom:8 }}>SESSION COMPLETE</div>
           <h2 style={{ fontSize:"clamp(26px,6vw,48px)",color:textColor,margin:"0 0 6px",textShadow:"0 0 30px #00ff8888" }}>{isReview?"REVIEW DONE!":lives<=0?"GAME OVER":"MASTERED!"}</h2>
           <div style={{ color:diff.color,fontSize:12,letterSpacing:4,marginBottom:4 }}>{diff.label} · {xpRank.name}</div>
