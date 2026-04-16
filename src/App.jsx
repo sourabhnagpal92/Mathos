@@ -223,8 +223,17 @@ function getVocabPool(diff, cat, seenRecently) {
   let pool = VOCAB_WORDS.filter(w => {
     if (diff !== "all" && w.diff !== diff) return false;
     if (cat !== "all") { const wc = w.cats || (w.cat ? [w.cat] : ["everyday"]); if (!wc.includes(cat)) return false; }
+    if (isWordFullyMastered(w.word)) return false; // skip fully mastered words
     return true;
   });
+  // If all words are mastered, include them anyway (so game doesn't break)
+  if (pool.length < 4) {
+    pool = VOCAB_WORDS.filter(w => {
+      if (diff !== "all" && w.diff !== diff) return false;
+      if (cat !== "all") { const wc = w.cats || (w.cat ? [w.cat] : ["everyday"]); if (!wc.includes(cat)) return false; }
+      return true;
+    });
+  }
   // Prefer unseen words
   const unseen = pool.filter(w => !seenRecently.has(w.word));
   return unseen.length >= 4 ? unseen : pool;
@@ -271,7 +280,7 @@ function loadVocabSave() {
   try { const r = localStorage.getItem("mathos_vocab_v1"); return r ? JSON.parse(r) : null; } catch(e) { return null; }
 }
 function writeVocabSave(d) { try { localStorage.setItem("mathos_vocab_v1", JSON.stringify(d)); } catch(e) {} }
-function buildDefaultVocabSave() { return { wrongWords: {}, masteredWords: [], seenWords: [], wordStats: {}, userName: null, onboarded: false, preferredDiff: "easy", preferredModules: ["math","vocab","sudoku"] }; }
+function buildDefaultVocabSave() { return { wrongWords: {}, masteredWords: [], seenWords: [], wordStats: {}, wordMastery: {}, userName: null, onboarded: false, preferredDiff: "easy", preferredModules: ["math","vocab","sudoku"] }; }
 
 let vocabSave = loadVocabSave() || buildDefaultVocabSave();
 // wrongWords: { word: { count: N, correctStreak: N } }
@@ -305,6 +314,48 @@ function recordVocabCorrect(word) {
     if (vocabSave.seenWords.length > 60) vocabSave.seenWords.shift();
   }
   writeVocabSave(vocabSave);
+}
+
+// ── Word mastery helpers ──
+// wordMastery[word][mode] = consecutive correct count (0-5)
+// A word is fully mastered when all 4 modes reach 5
+const MASTERY_MODES = ["word2meaning","meaning2word","antonym","spelling"];
+const MASTERY_THRESHOLD = 5;
+
+function getWordMastery(word) {
+  if (!vocabSave.wordMastery) vocabSave.wordMastery = {};
+  return vocabSave.wordMastery[word] || {};
+}
+
+function recordWordMasteryCorrect(word, mode) {
+  if (!vocabSave.wordMastery) vocabSave.wordMastery = {};
+  if (!vocabSave.wordMastery[word]) vocabSave.wordMastery[word] = {};
+  const cur = vocabSave.wordMastery[word][mode] || 0;
+  vocabSave.wordMastery[word][mode] = Math.min(MASTERY_THRESHOLD, cur + 1);
+  writeVocabSave(vocabSave);
+}
+
+function recordWordMasteryWrong(word, mode) {
+  if (!vocabSave.wordMastery) vocabSave.wordMastery = {};
+  if (!vocabSave.wordMastery[word]) vocabSave.wordMastery[word] = {};
+  vocabSave.wordMastery[word][mode] = 0; // reset to 0 on wrong
+  writeVocabSave(vocabSave);
+}
+
+function isWordFullyMastered(word) {
+  const m = getWordMastery(word);
+  return MASTERY_MODES.every(mode => (m[mode] || 0) >= MASTERY_THRESHOLD);
+}
+
+function getWordMasteryPct(word) {
+  const m = getWordMastery(word);
+  const total = MASTERY_MODES.reduce((sum, mode) => sum + (m[mode] || 0), 0);
+  return Math.round((total / (MASTERY_MODES.length * MASTERY_THRESHOLD)) * 100);
+}
+
+function getMasteryStars(word) {
+  const m = getWordMastery(word);
+  return MASTERY_MODES.filter(mode => (m[mode] || 0) >= MASTERY_THRESHOLD).length;
 }
 
 function getWrongWordsPool() {
@@ -511,7 +562,10 @@ export default function MathGame() {
   const [vocabTotal, setVocabTotal] = useState(0);
   const [vocabCorrect, setVocabCorrect] = useState(0);
   const [vocabSessionWords, setVocabSessionWords] = useState([]);
-  const [vocabScreen, setVocabScreen] = useState("intro"); // intro | game | summary
+  const [vocabScreen, setVocabScreen] = useState("intro"); // intro | game | summary | library
+  const [libraryFilter, setLibraryFilter] = useState("all"); // all | easy | medium | hard | mastered | learning
+  const [librarySearch, setLibrarySearch] = useState(""); 
+  const [expandedWord, setExpandedWord] = useState(null);
   const [vocabRecentSeen, setVocabRecentSeen] = useState(new Set());
   const [showSentence, setShowSentence] = useState(false);
   const [vocabQCount, setVocabQCount] = useState(10);
@@ -779,6 +833,7 @@ export default function MathGame() {
       setVocabStreak(s => s + 1);
       setVocabCorrect(c => c + 1);
       recordVocabCorrect(wordStr);
+      recordWordMasteryCorrect(wordStr, vocabQ.type);
       const xpAward = vocabQ.word.diff==="easy"?5:vocabQ.word.diff==="medium"?12:20;
       setVocabXpEarned(e => e + xpAward + vocabStreak);
       setXp(x => { const nx = x + xpAward + vocabStreak; globalXP = nx; persistAll(); return nx; });
@@ -786,6 +841,7 @@ export default function MathGame() {
       try{navigator.vibrate&&navigator.vibrate([80,30,80]);}catch(e){}
       setVocabStreak(0);
       recordVocabWrong(wordStr);
+      recordWordMasteryWrong(wordStr, vocabQ.type);
     }
     setVocabSessionWords(prev => [...prev, {
       word: wordStr, meaning: vocabQ.word.meaning, sentence: vocabQ.word.sentence,
@@ -1317,6 +1373,7 @@ export default function MathGame() {
               <div style={{ fontSize:14, color:vcol, letterSpacing:3 }}>VOCABULARY</div>
             </div>
             <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>setVocabScreen("library")} style={{ background:"transparent", border:`1px solid ${vcol}`, color:vcol, padding:"10px 14px", fontSize:12, cursor:"pointer", borderRadius:8, minHeight:44, letterSpacing:1 }}>📖</button>
               <button onClick={()=>setSoundOn(s=>!s)} style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"10px 14px", fontSize:14, cursor:"pointer", borderRadius:8, minHeight:44 }}>{soundOn?"🔊":"🔇"}</button>
             </div>
           </div>
@@ -1542,6 +1599,229 @@ export default function MathGame() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+
+        {/* ── WORD LIBRARY ── */}
+        {vocabScreen==="library"&&(
+          <div style={{ animation:"fadeIn 0.4s ease" }}>
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:13, color:"#fff", letterSpacing:3, marginBottom:2 }}>📖 WORD LIBRARY</div>
+              <div style={{ fontSize:10, color:mutedColor }}>{VOCAB_WORDS.length} words · tap a word to expand</div>
+            </div>
+
+            {/* Search */}
+            <div style={{ marginBottom:12 }}>
+              <input
+                value={librarySearch}
+                onChange={e=>setLibrarySearch(e.target.value)}
+                placeholder="Search words..."
+                style={{ width:"100%", boxSizing:"border-box", background:cardBg, border:`1px solid ${borderColor}`, color:"#fff", padding:"12px 16px", fontSize:14, borderRadius:10, fontFamily:"inherit", outline:"none" }}
+              />
+            </div>
+
+            {/* Filter pills */}
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+              {[
+                { key:"all",      label:"ALL",      col:vcol },
+                { key:"easy",     label:"EASY",     col:"#00ff88" },
+                { key:"medium",   label:"MEDIUM",   col:"#ffcc00" },
+                { key:"hard",     label:"HARD",     col:"#ff4466" },
+                { key:"mastered", label:"⭐ MASTERED", col:"#a78bfa" },
+                { key:"learning", label:"📚 LEARNING", col:"#00cfff" },
+                { key:"unseen",   label:"🆕 UNSEEN",   col:"#4a6070" },
+              ].map(f=>{
+                const sel = libraryFilter===f.key;
+                return (
+                  <button key={f.key} onClick={()=>setLibraryFilter(f.key)}
+                    style={{ background:sel?`${f.col}20`:"transparent", border:`1px solid ${sel?f.col:borderColor}`, borderRadius:20, padding:"7px 13px", cursor:"pointer", fontFamily:"inherit", color:sel?f.col:mutedColor, fontSize:10, letterSpacing:1, minHeight:34 }}>
+                    {f.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Stats summary row */}
+            {(()=>{
+              const total=VOCAB_WORDS.length;
+              const mastered=VOCAB_WORDS.filter(w=>isWordFullyMastered(w.word)).length;
+              const seen=VOCAB_WORDS.filter(w=>vocabSave.seenWords.includes(w.word)).length;
+              const learning=seen-mastered;
+              return (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginBottom:14 }}>
+                  {[
+                    { label:"TOTAL", val:total, col:vcol },
+                    { label:"MASTERED", val:mastered, col:"#a78bfa" },
+                    { label:"LEARNING", val:learning, col:"#00cfff" },
+                    { label:"UNSEEN", val:total-seen, col:"#4a6070" },
+                  ].map(s=>(
+                    <div key={s.label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:8, padding:"10px 6px", textAlign:"center" }}>
+                      <div style={{ fontSize:18, color:s.col, fontWeight:"bold" }}>{s.val}</div>
+                      <div style={{ fontSize:8, color:mutedColor, letterSpacing:1, marginTop:2 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Word list */}
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {VOCAB_WORDS
+                .filter(w => {
+                  // Search filter
+                  if (librarySearch && !w.word.toLowerCase().includes(librarySearch.toLowerCase()) && !w.meaning.toLowerCase().includes(librarySearch.toLowerCase())) return false;
+                  // Category filter
+                  if (libraryFilter==="easy") return w.diff==="easy";
+                  if (libraryFilter==="medium") return w.diff==="medium";
+                  if (libraryFilter==="hard") return w.diff==="hard";
+                  if (libraryFilter==="mastered") return isWordFullyMastered(w.word);
+                  if (libraryFilter==="learning") return vocabSave.seenWords.includes(w.word) && !isWordFullyMastered(w.word);
+                  if (libraryFilter==="unseen") return !vocabSave.seenWords.includes(w.word);
+                  return true;
+                })
+                .map(w => {
+                  const mastery = getWordMastery(w.word);
+                  const pct = getWordMasteryPct(w.word);
+                  const stars = getMasteryStars(w.word);
+                  const fullyMastered = isWordFullyMastered(w.word);
+                  const seen = vocabSave.seenWords.includes(w.word);
+                  const inReview = !!vocabSave.wrongWords[w.word];
+                  const isExpanded = expandedWord === w.word;
+                  const diffCol = w.diff==="easy"?"#00ff88":w.diff==="medium"?"#ffcc00":"#ff4466";
+
+                  return (
+                    <div key={w.word} style={{ background:cardBg, border:`1px solid ${fullyMastered?"#a78bfa44":inReview?"#ff446633":borderColor}`, borderRadius:12, overflow:"hidden", transition:"all 0.2s" }}>
+                      {/* Word row */}
+                      <div onClick={()=>setExpandedWord(isExpanded?null:w.word)}
+                        style={{ padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", gap:12 }}>
+                        
+                        {/* Diff badge */}
+                        <div style={{ background:`${diffCol}22`, border:`1px solid ${diffCol}55`, borderRadius:6, padding:"3px 8px", fontSize:9, color:diffCol, letterSpacing:1, flexShrink:0, minWidth:52, textAlign:"center" }}>
+                          {w.diff.toUpperCase()}
+                        </div>
+
+                        {/* Word + phonetic */}
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                            <span style={{ fontSize:15, color:"#fff", fontWeight:"bold" }}>{w.word}</span>
+                            {fullyMastered&&<span style={{ fontSize:14 }}>⭐</span>}
+                            {inReview&&<span style={{ fontSize:11, color:"#ff4466" }}>❌</span>}
+                            {!seen&&<span style={{ fontSize:9, color:mutedColor, border:`1px solid ${borderColor}`, borderRadius:10, padding:"1px 6px" }}>NEW</span>}
+                          </div>
+                          <div style={{ fontSize:10, color:mutedColor, marginTop:1 }}>{w.phonetic} <span style={{color:"#a78bfa66"}}>{w.ipa}</span></div>
+                        </div>
+
+                        {/* Mastery progress */}
+                        <div style={{ textAlign:"right", flexShrink:0 }}>
+                          <div style={{ fontSize:11, color:fullyMastered?"#a78bfa":seen?"#00cfff":mutedColor, marginBottom:3 }}>
+                            {fullyMastered?"MASTERED":seen?`${pct}%`:"UNSEEN"}
+                          </div>
+                          <div style={{ width:60, height:4, background:"#1a3040", borderRadius:2, overflow:"hidden" }}>
+                            <div style={{ height:"100%", width:`${pct}%`, background:fullyMastered?"#a78bfa":pct>=60?"#00ff88":pct>=30?"#ffcc00":"#ff4466", borderRadius:2, transition:"width 0.4s" }} />
+                          </div>
+                        </div>
+
+                        {/* Expand arrow */}
+                        <div style={{ color:mutedColor, fontSize:12, flexShrink:0 }}>{isExpanded?"▲":"▼"}</div>
+                      </div>
+
+                      {/* Expanded detail */}
+                      {isExpanded&&(
+                        <div style={{ borderTop:`1px solid ${borderColor}`, padding:"14px 16px", animation:"fadeInFast 0.2s ease" }}>
+                          {/* Meaning */}
+                          <div style={{ fontSize:13, color:"#ffffffcc", lineHeight:1.5, marginBottom:10 }}>
+                            <span style={{ fontSize:9, color:mutedColor, letterSpacing:2, display:"block", marginBottom:4 }}>MEANING</span>
+                            {w.meaning}
+                          </div>
+
+                          {/* Example sentence */}
+                          <div style={{ fontSize:12, color:"#ffffff88", fontStyle:"italic", lineHeight:1.5, marginBottom:12 }}>"{w.sentence}"</div>
+
+                          {/* Synonyms + Antonyms */}
+                          <div style={{ display:"flex", gap:12, marginBottom:14, flexWrap:"wrap" }}>
+                            <div>
+                              <div style={{ fontSize:9, color:"#00ff88", letterSpacing:2, marginBottom:4 }}>SYNONYMS</div>
+                              <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                                {(w.synonyms||[]).map(s=><span key={s} style={{ fontSize:10, color:"#00ff88", border:"1px solid #00ff8833", borderRadius:10, padding:"2px 8px" }}>{s}</span>)}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize:9, color:"#ff6b35", letterSpacing:2, marginBottom:4 }}>ANTONYMS</div>
+                              <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                                {(w.antonyms||[]).map(a=><span key={a} style={{ fontSize:10, color:"#ff6b35", border:"1px solid #ff6b3533", borderRadius:10, padding:"2px 8px" }}>{a}</span>)}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Per-mode mastery breakdown */}
+                          <div style={{ background:bg, borderRadius:8, padding:"10px 12px" }}>
+                            <div style={{ fontSize:9, color:mutedColor, letterSpacing:2, marginBottom:8 }}>MASTERY BY MODE</div>
+                            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                              {MASTERY_MODES.map(mode => {
+                                const streak = mastery[mode] || 0;
+                                const modeLabel = mode==="word2meaning"?"Word → Meaning":mode==="meaning2word"?"Meaning → Word":mode==="antonym"?"Antonym":"Spelling";
+                                return (
+                                  <div key={mode} style={{ display:"flex", alignItems:"center", gap:10 }}>
+                                    <div style={{ fontSize:10, color:"#fff", minWidth:120 }}>{modeLabel}</div>
+                                    <div style={{ flex:1, height:6, background:"#1a3040", borderRadius:3, overflow:"hidden" }}>
+                                      <div style={{ height:"100%", width:`${(streak/MASTERY_THRESHOLD)*100}%`, background:streak>=MASTERY_THRESHOLD?"#a78bfa":streak>=3?"#00ff88":streak>=1?"#ffcc00":"#1a3040", borderRadius:3, transition:"width 0.4s" }} />
+                                    </div>
+                                    <div style={{ fontSize:10, color:streak>=MASTERY_THRESHOLD?"#a78bfa":mutedColor, minWidth:28, textAlign:"right" }}>
+                                      {streak>=MASTERY_THRESHOLD?"✓":`${streak}/5`}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                            <button onClick={()=>speakText(w.word,null)}
+                              style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"10px", fontSize:12, cursor:"pointer", borderRadius:8, fontFamily:"inherit" }}>
+                              🔊 Listen
+                            </button>
+                            <button onClick={()=>{
+                              // Start a practice session for just this word
+                              setVocabMode("word2meaning");
+                              setVocabDiff(w.diff);
+                              setVocabCat("all");
+                              setExpandedWord(null);
+                              setVocabScreen("intro");
+                            }}
+                              style={{ flex:2, background:vcolLight, border:`1px solid ${vcol}`, color:vcol, padding:"10px", fontSize:12, cursor:"pointer", borderRadius:8, fontFamily:"inherit", letterSpacing:1 }}>
+                              Practice this word →
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              }
+
+              {/* Empty state */}
+              {VOCAB_WORDS.filter(w=>{
+                if (librarySearch && !w.word.toLowerCase().includes(librarySearch.toLowerCase()) && !w.meaning.toLowerCase().includes(librarySearch.toLowerCase())) return false;
+                if (libraryFilter==="mastered") return isWordFullyMastered(w.word);
+                if (libraryFilter==="learning") return vocabSave.seenWords.includes(w.word) && !isWordFullyMastered(w.word);
+                if (libraryFilter==="unseen") return !vocabSave.seenWords.includes(w.word);
+                return libraryFilter==="all"||w.diff===libraryFilter;
+              }).length===0&&(
+                <div style={{ textAlign:"center", padding:"40px 20px", color:mutedColor, fontSize:13 }}>
+                  {librarySearch?"No words match your search":"No words in this category yet"}
+                </div>
+              )}
+            </div>
+
+            {/* Back button at bottom */}
+            <div style={{ marginTop:20, marginBottom:8 }}>
+              <button onClick={()=>{setVocabScreen("intro");setExpandedWord(null);setLibrarySearch("");}}
+                style={{ width:"100%", background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"14px", fontSize:13, letterSpacing:3, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:50 }}>
+                ← BACK TO MENU
+              </button>
+            </div>
           </div>
         )}
 
