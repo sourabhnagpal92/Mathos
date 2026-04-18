@@ -1917,7 +1917,7 @@ export default function MathGame() {
         // Show a reminder if they haven't played today yet
         const lastPlay = dailyStreak.lastDate;
         if (lastPlay && lastPlay !== today) {
-          new Notification("MATH_OS — Keep your streak!", {
+          new Notification("BRain_TRain — Keep your streak!", {
             body: `You have a ${dailyStreak.count}-day streak. Don't lose it today!`,
             icon: "/icons/icon-192.png",
             tag: "daily-reminder"
@@ -1955,7 +1955,7 @@ export default function MathGame() {
             </div>
             {onboardStep===0&&(
               <div style={{ textAlign:"center" }}>
-                <div style={{ fontSize:22,color:"#00ff88",marginBottom:12,letterSpacing:3 }}>MATH_OS</div>
+                <div style={{ fontSize:22,color:"#00ff88",marginBottom:12,letterSpacing:3 }}>BRain_TRain</div>
                 <div style={{ color:mutedColor,fontSize:12,lineHeight:1.9,marginBottom:24 }}>Math · Vocabulary · Logic<br/><span style={{color:"#fff"}}>XP · Streaks · Progress tracking</span></div>
                 <button onClick={()=>setOnboardStep(1)} style={{ width:"100%",background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"16px",fontSize:14,letterSpacing:4,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:54 }}>GET STARTED →</button>
               </div>
@@ -1994,7 +1994,7 @@ export default function MathGame() {
 
       <div style={{ textAlign:"center", animation:"fadeIn 0.6s ease", maxWidth:"min(480px,100%)", width:"100%", paddingTop:"max(env(safe-area-inset-top), 40px)", paddingBottom:"max(env(safe-area-inset-bottom), 32px)" }}>
         <div style={{ fontSize:10, letterSpacing:6, color:"#00ff88", marginBottom:8, opacity:0.6 }}>{playerName ? `WELCOME BACK, ${playerName.toUpperCase()}` : "SELECT MODULE"}</div>
-        <h1 style={{ fontSize:"clamp(44px,11vw,72px)", color:textColor, margin:"0 0 4px", textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844", animation:"glitch 3s infinite", letterSpacing:3 }}>MATH<span style={{color:"#00ff88"}}>_</span>OS</h1>
+        <h1 style={{ fontSize:"clamp(44px,11vw,72px)", color:textColor, margin:"0 0 4px", textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844", animation:"glitch 3s infinite", letterSpacing:3 }}>BRain<span style={{color:"#00ff88"}}>_</span>TRain</h1>
         <div style={{ color:"#00ff88", fontSize:13, letterSpacing:5, marginBottom:24, opacity:0.7 }}>COGNITIVE TRAINING SYSTEM v3.0</div>
 
         {/* XP penalty notification */}
@@ -2803,7 +2803,7 @@ export default function MathGame() {
       {screen==="intro"&&(
         <div style={{ textAlign:"center",animation:"fadeIn 0.5s ease",maxWidth:"min(430px,100%)",width:"100%", paddingTop:"max(env(safe-area-inset-top),50px)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
           <div style={{ fontSize:10,letterSpacing:6,color:"#00ff88",marginBottom:6,opacity:0.6 }}>MATH TRAINING</div>
-          <h1 style={{ fontSize:"clamp(42px,10vw,68px)",color:textColor,margin:"0 0 4px",textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844",animation:"glitch 3s infinite",letterSpacing:3 }}>MATH<span style={{color:"#00ff88"}}>_</span>OS</h1>
+          <h1 style={{ fontSize:"clamp(42px,10vw,68px)",color:textColor,margin:"0 0 4px",textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844",animation:"glitch 3s infinite",letterSpacing:3 }}>BRain<span style={{color:"#00ff88"}}>_</span>TRain</h1>
           <div style={{ color:"#00ff88",fontSize:12,letterSpacing:5,marginBottom:14,opacity:0.7 }}>COGNITIVE TRAINING SYSTEM</div>
 
           {/* XP bar */}
