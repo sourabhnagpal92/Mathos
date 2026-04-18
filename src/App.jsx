@@ -6,7 +6,7 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // ── XP System ──
 const XP_LEVELS = [
-  { name: "NOVICE", xpNeeded: 0, color: "#4a6070" },
+  { name: "NOVICE", xpNeeded: 0, color: "#ffffff" },
   { name: "APPRENTICE", xpNeeded: 200, color: "#00ff88" },
   { name: "SCHOLAR", xpNeeded: 600, color: "#00cfff" },
   { name: "EXPERT", xpNeeded: 1200, color: "#ffcc00" },
@@ -957,15 +957,21 @@ function getVocabPool(diff, cat, seenRecently) {
     if (diff !== "all" && w.diff !== diff) return false;
     if (cat !== "all") { const wc = w.cats || (w.cat ? [w.cat] : ["everyday"]); if (!wc.includes(cat)) return false; }
     if (isWordFullyMastered(w.word)) return false; // skip fully mastered words
+    if (isWordDisabled(w.word)) return false; // skip disabled words
     return true;
   });
-  // If all words are mastered, include them anyway (so game doesn't break)
+  // If all words are mastered/disabled, include non-disabled anyway (so game doesn't break)
   if (pool.length < 4) {
     pool = VOCAB_WORDS.filter(w => {
       if (diff !== "all" && w.diff !== diff) return false;
       if (cat !== "all") { const wc = w.cats || (w.cat ? [w.cat] : ["everyday"]); if (!wc.includes(cat)) return false; }
+      if (isWordDisabled(w.word)) return false;
       return true;
     });
+  }
+  // Last resort: all non-disabled words
+  if (pool.length < 4) {
+    pool = VOCAB_WORDS.filter(w => !isWordDisabled(w.word));
   }
   // Prefer unseen words
   const unseen = pool.filter(w => !seenRecently.has(w.word));
@@ -1013,7 +1019,7 @@ function loadVocabSave() {
   try { const r = localStorage.getItem("mathos_vocab_v1"); return r ? JSON.parse(r) : null; } catch(e) { return null; }
 }
 function writeVocabSave(d) { try { localStorage.setItem("mathos_vocab_v1", JSON.stringify(d)); } catch(e) {} }
-function buildDefaultVocabSave() { return { wrongWords: {}, masteredWords: [], seenWords: [], wordStats: {}, wordMastery: {}, userName: null, onboarded: false, preferredDiff: "easy", preferredModules: ["math","vocab","sudoku"] }; }
+function buildDefaultVocabSave() { return { wrongWords: {}, masteredWords: [], seenWords: [], wordStats: {}, wordMastery: {}, disabledWords: [], userName: null, onboarded: false, preferredDiff: "easy", preferredModules: ["math","vocab","sudoku"] }; }
 
 let vocabSave = loadVocabSave() || buildDefaultVocabSave();
 // wrongWords: { word: { count: N, correctStreak: N } }
@@ -1091,6 +1097,19 @@ function getMasteryStars(word) {
   return MASTERY_MODES.filter(mode => (m[mode] || 0) >= MASTERY_THRESHOLD).length;
 }
 
+
+function isWordDisabled(word) {
+  return (vocabSave.disabledWords || []).includes(word);
+}
+function toggleWordDisabled(word) {
+  if (!vocabSave.disabledWords) vocabSave.disabledWords = [];
+  if (vocabSave.disabledWords.includes(word)) {
+    vocabSave.disabledWords = vocabSave.disabledWords.filter(w => w !== word);
+  } else {
+    vocabSave.disabledWords.push(word);
+  }
+  writeVocabSave(vocabSave);
+}
 function getWrongWordsPool() {
   return Object.keys(vocabSave.wrongWords).map(w => VOCAB_WORDS.find(v => v.word === w)).filter(Boolean);
 }
@@ -1299,6 +1318,7 @@ export default function MathGame() {
   const [libraryFilter, setLibraryFilter] = useState("all"); // all | easy | medium | hard | mastered | learning
   const [librarySearch, setLibrarySearch] = useState(""); 
   const [expandedWord, setExpandedWord] = useState(null);
+  const [disabledWordsVersion, setDisabledWordsVersion] = useState(0); // incremented on toggle to force re-render
   const [vocabRecentSeen, setVocabRecentSeen] = useState(new Set());
   const [showSentence, setShowSentence] = useState(false);
   const [vocabQCount, setVocabQCount] = useState(10);
@@ -1358,7 +1378,7 @@ export default function MathGame() {
   const bg = theme==="dark" ? "#050a0f" : "#f0f4f8";
   const cardBg = theme==="dark" ? "#0a1520" : "#ffffff";
   const textColor = theme==="dark" ? "#fff" : "#1a2530";
-  const mutedColor = theme==="dark" ? "#4a6070" : "#8a9aaa";
+  const mutedColor = theme==="dark" ? "#ffffff" : "#1a2530";
   const borderColor = theme==="dark" ? "#1a3040" : "#dde8f0";
 
   const snd = useCallback((t) => { if (soundOn) playSound(t); }, [soundOn]);
@@ -1911,7 +1931,7 @@ export default function MathGame() {
   const timerPct=(timeLeft/TOTAL_TIME)*100;
   const timerColor=timeLeft>10?level.color:timeLeft>5?"#ffcc00":"#ff4466";
   const adaptiveLabel=adaptiveLevel>0?"↑ HARDER":adaptiveLevel<0?"↓ EASIER":"ADAPTIVE";
-  const adaptiveColor=adaptiveLevel>0?"#ff6b35":adaptiveLevel<0?"#00cfff":"#4a6070";
+  const adaptiveColor=adaptiveLevel>0?"#ff6b35":adaptiveLevel<0?"#00cfff":mutedColor;
 
   const panelStyle = { background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"16px 20px", marginBottom:12 };
 
@@ -1928,7 +1948,7 @@ export default function MathGame() {
             <div style={{ textAlign:"center",marginBottom:28 }}>
               <div style={{ fontSize:52,marginBottom:10 }}>{["👋","✏️","🎯"][onboardStep]}</div>
               <h2 style={{ fontSize:26,color:"#fff",margin:"0 0 6px",letterSpacing:2 }}>{["Welcome!","Your Name","Difficulty"][onboardStep]}</h2>
-              <div style={{ color:"#4a6070",fontSize:12,letterSpacing:2 }}>{["Let's personalise your experience","What should we call you?","You can change this anytime"][onboardStep]}</div>
+              <div style={{ color:mutedColor,fontSize:12,letterSpacing:2 }}>{["Let's personalise your experience","What should we call you?","You can change this anytime"][onboardStep]}</div>
             </div>
             <div style={{ display:"flex",gap:8,justifyContent:"center",marginBottom:28 }}>
               {[0,1,2].map(i=><div key={i} style={{ width:i===onboardStep?24:8,height:8,borderRadius:4,background:i===onboardStep?"#00ff88":i<onboardStep?"#00ff8844":"#1a3040",transition:"all 0.3s" }} />)}
@@ -1936,7 +1956,7 @@ export default function MathGame() {
             {onboardStep===0&&(
               <div style={{ textAlign:"center" }}>
                 <div style={{ fontSize:22,color:"#00ff88",marginBottom:12,letterSpacing:3 }}>MATH_OS</div>
-                <div style={{ color:"#4a6070",fontSize:12,lineHeight:1.9,marginBottom:24 }}>Math · Vocabulary · Logic<br/><span style={{color:"#fff"}}>XP · Streaks · Progress tracking</span></div>
+                <div style={{ color:mutedColor,fontSize:12,lineHeight:1.9,marginBottom:24 }}>Math · Vocabulary · Logic<br/><span style={{color:"#fff"}}>XP · Streaks · Progress tracking</span></div>
                 <button onClick={()=>setOnboardStep(1)} style={{ width:"100%",background:"transparent",border:"2px solid #00ff88",color:"#00ff88",padding:"16px",fontSize:14,letterSpacing:4,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:54 }}>GET STARTED →</button>
               </div>
             )}
@@ -1954,7 +1974,7 @@ export default function MathGame() {
                   {[{k:"easy",l:"EASY",d:"Start simple",c:"#00ff88"},{k:"medium",l:"MEDIUM",d:"Balanced challenge",c:"#ffcc00"},{k:"hard",l:"HARD",d:"Maximum challenge",c:"#ff4466"}].map(d=>(
                     <button key={d.k} onClick={()=>setDifficulty(d.k)} style={{ background:difficulty===d.k?`${d.c}18`:"transparent",border:`2px solid ${difficulty===d.k?d.c:"#1a3040"}`,borderRadius:10,padding:"14px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"left",display:"flex",alignItems:"center",gap:12 }}>
                       <div style={{ width:10,height:10,borderRadius:"50%",background:d.c,flexShrink:0 }} />
-                      <div><div style={{ fontSize:13,color:difficulty===d.k?d.c:"#fff",letterSpacing:2 }}>{d.l}</div><div style={{ fontSize:10,color:"#4a6070",marginTop:2 }}>{d.d}</div></div>
+                      <div><div style={{ fontSize:13,color:difficulty===d.k?d.c:"#fff",letterSpacing:2 }}>{d.l}</div><div style={{ fontSize:10,color:mutedColor,marginTop:2 }}>{d.d}</div></div>
                     </button>
                   ))}
                 </div>
@@ -2364,6 +2384,7 @@ export default function MathGame() {
                 { key:"mastered", label:"⭐ MASTERED", col:"#a78bfa" },
                 { key:"learning", label:"📚 LEARNING", col:"#00cfff" },
                 { key:"unseen",   label:"🆕 UNSEEN",   col:"#4a6070" },
+                { key:"disabled",  label:"🚫 DISABLED",  col:"#ff6b35" },
               ].map(f=>{
                 const sel = libraryFilter===f.key;
                 return (
@@ -2381,13 +2402,15 @@ export default function MathGame() {
               const mastered=VOCAB_WORDS.filter(w=>isWordFullyMastered(w.word)).length;
               const seen=VOCAB_WORDS.filter(w=>vocabSave.seenWords.includes(w.word)).length;
               const learning=seen-mastered;
+              const disabledCount=(vocabSave.disabledWords||[]).length;
               return (
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginBottom:14 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr", gap:6, marginBottom:14 }}>
                   {[
                     { label:"TOTAL", val:total, col:vcol },
                     { label:"MASTERED", val:mastered, col:"#a78bfa" },
                     { label:"LEARNING", val:learning, col:"#00cfff" },
                     { label:"UNSEEN", val:total-seen, col:"#4a6070" },
+                    { label:"DISABLED", val:disabledCount, col:"#ff6b35" },
                   ].map(s=>(
                     <div key={s.label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:8, padding:"10px 6px", textAlign:"center" }}>
                       <div style={{ fontSize:18, color:s.col, fontWeight:"bold" }}>{s.val}</div>
@@ -2411,6 +2434,7 @@ export default function MathGame() {
                   if (libraryFilter==="mastered") return isWordFullyMastered(w.word);
                   if (libraryFilter==="learning") return vocabSave.seenWords.includes(w.word) && !isWordFullyMastered(w.word);
                   if (libraryFilter==="unseen") return !vocabSave.seenWords.includes(w.word);
+                  if (libraryFilter==="disabled") return isWordDisabled(w.word);
                   return true;
                 })
                 .map(w => {
@@ -2424,7 +2448,7 @@ export default function MathGame() {
                   const diffCol = w.diff==="easy"?"#00ff88":w.diff==="medium"?"#ffcc00":"#ff4466";
 
                   return (
-                    <div key={w.word} style={{ background:cardBg, border:`1px solid ${fullyMastered?"#a78bfa44":inReview?"#ff446633":borderColor}`, borderRadius:12, overflow:"hidden", transition:"all 0.2s" }}>
+                    <div key={w.word} style={{ background:cardBg, border:`1px solid ${isWordDisabled(w.word)?"#ff6b3533":fullyMastered?"#a78bfa44":inReview?"#ff446633":borderColor}`, borderRadius:12, overflow:"hidden", transition:"all 0.2s", opacity:isWordDisabled(w.word)?0.6:1 }}>
                       {/* Word row */}
                       <div onClick={()=>setExpandedWord(isExpanded?null:w.word)}
                         style={{ padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", gap:12 }}>
@@ -2441,6 +2465,7 @@ export default function MathGame() {
                             {fullyMastered&&<span style={{ fontSize:14 }}>⭐</span>}
                             {inReview&&<span style={{ fontSize:11, color:"#ff4466" }}>❌</span>}
                             {!seen&&<span style={{ fontSize:9, color:mutedColor, border:`1px solid ${borderColor}`, borderRadius:10, padding:"1px 6px" }}>NEW</span>}
+                            {isWordDisabled(w.word)&&<span style={{ fontSize:9, color:"#ff6b35", border:"1px solid #ff6b3544", borderRadius:10, padding:"1px 6px" }}>DISABLED</span>}
                           </div>
                           <div style={{ fontSize:10, color:mutedColor, marginTop:1 }}>{w.phonetic} <span style={{color:"#a78bfa66"}}>{w.ipa}</span></div>
                         </div>
@@ -2510,21 +2535,27 @@ export default function MathGame() {
                           </div>
 
                           {/* Action buttons */}
-                          <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                          <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
                             <button onClick={()=>speakText(w.word,null)}
-                              style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"10px", fontSize:12, cursor:"pointer", borderRadius:8, fontFamily:"inherit" }}>
+                              style={{ flex:1, minWidth:80, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"10px", fontSize:12, cursor:"pointer", borderRadius:8, fontFamily:"inherit" }}>
                               🔊 Listen
                             </button>
                             <button onClick={()=>{
-                              // Start a practice session for just this word
+                              toggleWordDisabled(w.word);
+                              setDisabledWordsVersion(v=>v+1);
+                            }}
+                              style={{ flex:1, minWidth:80, background:isWordDisabled(w.word)?"#00ff8818":"#ff6b3518", border:`1px solid ${isWordDisabled(w.word)?"#00ff88":"#ff6b35"}`, color:isWordDisabled(w.word)?"#00ff88":"#ff6b35", padding:"10px", fontSize:11, cursor:"pointer", borderRadius:8, fontFamily:"inherit", letterSpacing:1 }}>
+                              {isWordDisabled(w.word)?"✓ Re-enable":"🚫 Disable"}
+                            </button>
+                            <button onClick={()=>{
                               setVocabMode("word2meaning");
                               setVocabDiff(w.diff);
                               setVocabCat("all");
                               setExpandedWord(null);
                               setVocabScreen("intro");
                             }}
-                              style={{ flex:2, background:vcolLight, border:`1px solid ${vcol}`, color:vcol, padding:"10px", fontSize:12, cursor:"pointer", borderRadius:8, fontFamily:"inherit", letterSpacing:1 }}>
-                              Practice this word →
+                              style={{ flex:2, minWidth:120, background:vcolLight, border:`1px solid ${vcol}`, color:vcol, padding:"10px", fontSize:12, cursor:"pointer", borderRadius:8, fontFamily:"inherit", letterSpacing:1 }}>
+                              Practice →
                             </button>
                           </div>
                         </div>
@@ -2540,6 +2571,7 @@ export default function MathGame() {
                 if (libraryFilter==="mastered") return isWordFullyMastered(w.word);
                 if (libraryFilter==="learning") return vocabSave.seenWords.includes(w.word) && !isWordFullyMastered(w.word);
                 if (libraryFilter==="unseen") return !vocabSave.seenWords.includes(w.word);
+                if (libraryFilter==="disabled") return isWordDisabled(w.word);
                 return libraryFilter==="all"||w.diff===libraryFilter;
               }).length===0&&(
                 <div style={{ textAlign:"center", padding:"40px 20px", color:mutedColor, fontSize:13 }}>
