@@ -1327,6 +1327,18 @@ export default function MathGame() {
   const [vocabXpEarned, setVocabXpEarned] = useState(0);
   const [onboardStep, setOnboardStep] = useState(0);
   const [onboardName, setOnboardName] = useState("");
+  // ── Reflex module state ──
+  const [reflexRounds, setReflexRounds] = useState(10);
+  const [reflexPhase, setReflexPhase] = useState("intro"); // intro | waiting | go | result | summary
+  const [reflexColor, setReflexColor] = useState("red");
+  const [reflexRoundIdx, setReflexRoundIdx] = useState(0);
+  const [reflexTimes, setReflexTimes] = useState([]);
+  const [reflexStart, setReflexStart] = useState(null);
+  const [reflexResult, setReflexResult] = useState(null); // ms or "early"
+  const [reflexTimer, setReflexTimer] = useState(null);
+  const [reflexDifficulty, setReflexDifficulty] = useState("medium");
+  const [reflexPB, setReflexPB] = useState(() => { try { return JSON.parse(localStorage.getItem("braintrain_reflex_pb")||"null"); } catch(e){return null;} });
+
   const [showOnboard, setShowOnboard] = useState(false); // only show when user triggers it
   const [playerName, setPlayerName] = useState(vocabSave.userName||"");
   const [showSettings, setShowSettings] = useState(false);
@@ -1618,6 +1630,92 @@ export default function MathGame() {
     setVocabSessionStart(Date.now()); setVocabXpEarned(0);
     setVocabQ(null); // clear old question
     setVocabScreen("game");
+  }
+
+  // ── Reflex helpers ──
+  function reflexGetDelay() {
+    if (reflexDifficulty==="easy")   return 2000 + Math.random()*3000;   // 2-5s
+    if (reflexDifficulty==="medium") return 1500 + Math.random()*2500;   // 1.5-4s
+    return 500 + Math.random()*3000;  // hard: 0.5-3.5s
+  }
+
+  function startReflexRound() {
+    setReflexColor("red");
+    setReflexResult(null);
+    setReflexPhase("waiting");
+    const delay = reflexGetDelay();
+    // Hard mode: 25% chance of a fake green flash
+    const doFake = reflexDifficulty==="hard" && Math.random()<0.25;
+    let t;
+    if (doFake) {
+      const fakeAt = delay * 0.4;
+      const fakeTimer = setTimeout(() => {
+        setReflexColor("fake"); // briefly flash a different shade
+        setTimeout(() => setReflexColor("red"), 300);
+      }, fakeAt);
+    }
+    t = setTimeout(() => {
+      setReflexColor("green");
+      setReflexStart(Date.now());
+      setReflexPhase("go");
+    }, delay);
+    setReflexTimer(t);
+  }
+
+  function handleReflexTap() {
+    if (reflexPhase==="waiting") {
+      // Tapped too early
+      clearTimeout(reflexTimer);
+      try{navigator.vibrate&&navigator.vibrate([80,30,80]);}catch(e){}
+      setReflexResult("early");
+      setReflexPhase("result");
+      return;
+    }
+    if (reflexPhase==="go") {
+      const ms = Date.now() - reflexStart;
+      try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}
+      setReflexResult(ms);
+      setReflexTimes(prev => [...prev, ms]);
+      setReflexPhase("result");
+      // XP based on speed
+      const xpEarned = ms<150?20:ms<200?14:ms<250?10:ms<300?7:4;
+      setXp(x=>{ const nx=x+xpEarned; globalXP=nx; persistAll(); return nx; });
+      return;
+    }
+    if (reflexPhase==="result") {
+      // Advance
+      const next = reflexRoundIdx + 1;
+      if (next >= reflexRounds) {
+        // Save PB
+        const validTimes = [...reflexTimes, typeof reflexResult==="number"?reflexResult:null].filter(Boolean);
+        if (validTimes.length > 0) {
+          const avg = Math.round(validTimes.reduce((a,b)=>a+b,0)/validTimes.length);
+          if (!reflexPB || avg < reflexPB) {
+            setReflexPB(avg);
+            try{ localStorage.setItem("braintrain_reflex_pb", JSON.stringify(avg)); }catch(e){}
+          }
+        }
+        setReflexPhase("summary");
+      } else {
+        setReflexRoundIdx(next);
+        startReflexRound();
+      }
+    }
+  }
+
+  function startReflexGame() {
+    setReflexTimes([]);
+    setReflexRoundIdx(0);
+    setReflexResult(null);
+    startReflexRound();
+  }
+
+  function reflexRating(ms) {
+    if (ms<150) return { label:"⚡ ELITE", color:"#ffcc00" };
+    if (ms<200) return { label:"🌟 EXCELLENT", color:"#00ff88" };
+    if (ms<250) return { label:"✅ GOOD", color:"#00cfff" };
+    if (ms<300) return { label:"👍 AVERAGE", color:"#a78bfa" };
+    return { label:"📈 KEEP TRAINING", color:"#ff6b35" };
   }
 
   function handleStart() {
@@ -2041,6 +2139,13 @@ export default function MathGame() {
             <div style={{ fontSize:32, marginBottom:8 }}>📚</div>
             <div>VOCABULARY</div>
             <div style={{ fontSize:11, color:"#a78bfa99", marginTop:4, letterSpacing:1 }}>Words · Meanings · Spelling · Antonyms</div>
+          </button>
+          <button onClick={()=>{setAppMode("reflex");setReflexPhase("intro");setReflexTimes([]);setReflexRoundIdx(0);}} style={{ background:"transparent", border:"2px solid #ff6b35", color:"#ff6b35", padding:"clamp(18px,4.5vw,24px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #ff6b3544", transition:"all 0.2s", minHeight:"clamp(78px,20vw,90px)" }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#ff6b3518";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div style={{ fontSize:32, marginBottom:8 }}>⚡</div>
+            <div>REFLEX</div>
+            <div style={{ fontSize:11, color:"#ff6b3599", marginTop:4, letterSpacing:1 }}>Reaction Time · Speed · Impulse Control</div>
           </button>
         </div>
 
@@ -2655,6 +2760,290 @@ export default function MathGame() {
         )}
 
         </div>
+      </div>
+    );
+  }
+
+
+  // ── REFLEX MODULE ──
+  if (appMode==="reflex") {
+    const rcol = "#ff6b35";
+    const rcolLight = "#ff6b3518";
+    const screenBg = reflexPhase==="go" ? "#00c853" : reflexPhase==="waiting" ? (reflexColor==="fake"?"#ff9800":"#c62828") : bg;
+    const isActive = reflexPhase==="waiting"||reflexPhase==="go";
+    const validTimes = reflexTimes.filter(t=>typeof t==="number");
+    const avgTime = validTimes.length>0 ? Math.round(validTimes.reduce((a,b)=>a+b,0)/validTimes.length) : null;
+    const bestTime = validTimes.length>0 ? Math.min(...validTimes) : null;
+    const worstTime = validTimes.length>0 ? Math.max(...validTimes) : null;
+
+    // consistency score: 100 - (stddev/mean)*100, clamped 0-100
+    let consistencyScore = null;
+    if (validTimes.length>1 && avgTime) {
+      const variance = validTimes.reduce((s,t)=>s+Math.pow(t-avgTime,2),0)/validTimes.length;
+      const stddev = Math.sqrt(variance);
+      consistencyScore = Math.max(0, Math.round(100-(stddev/avgTime)*100));
+    }
+
+    return (
+      <div onClick={isActive?handleReflexTap:undefined}
+        style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:screenBg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:isActive?"center":"flex-start", padding:isActive?"0":"0 max(12px,3.5vw)", overflowY:isActive?"hidden":"auto", WebkitOverflowScrolling:"touch", transition:"background 0.15s", cursor:isActive?"pointer":"default", userSelect:"none", WebkitUserSelect:"none" }}>
+        <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}} @keyframes popIn{0%{transform:scale(0.5);opacity:0}100%{transform:scale(1);opacity:1}}`}</style>
+
+        {/* ── ACTIVE SCREENS (waiting / go) ── */}
+        {isActive&&(
+          <div style={{ textAlign:"center", animation:"fadeIn 0.2s ease", padding:"20px" }}>
+            {reflexPhase==="waiting"&&(
+              <>
+                <div style={{ fontSize:"clamp(48px,15vw,80px)", marginBottom:16 }}>🔴</div>
+                <div style={{ fontSize:"clamp(22px,6vw,36px)", color:"#fff", letterSpacing:4, fontWeight:"bold", marginBottom:12 }}>WAIT...</div>
+                <div style={{ fontSize:"clamp(12px,3vw,16px)", color:"rgba(255,255,255,0.7)", letterSpacing:2 }}>Don't tap yet — wait for GREEN</div>
+                <div style={{ fontSize:"clamp(11px,2.5vw,14px)", color:"rgba(255,255,255,0.4)", marginTop:8, letterSpacing:1 }}>Round {reflexRoundIdx+1} / {reflexRounds}</div>
+              </>
+            )}
+            {reflexPhase==="go"&&(
+              <>
+                <div style={{ fontSize:"clamp(48px,15vw,80px)", marginBottom:16, animation:"pulse 0.4s ease infinite" }}>🟢</div>
+                <div style={{ fontSize:"clamp(28px,8vw,52px)", color:"#fff", letterSpacing:4, fontWeight:"bold", marginBottom:12 }}>TAP NOW!</div>
+                <div style={{ fontSize:"clamp(12px,3vw,16px)", color:"rgba(255,255,255,0.7)", letterSpacing:2 }}>TAP ANYWHERE</div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── NON-ACTIVE SCREENS ── */}
+        {!isActive&&(
+          <>
+            {/* Header */}
+            <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                <button onClick={()=>{ clearTimeout(reflexTimer); setAppMode("home"); }} style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", minHeight:44 }}>← HOME</button>
+                <div style={{ textAlign:"center" }}>
+                  <div style={{ fontSize:10, color:mutedColor, letterSpacing:4 }}>MODULE</div>
+                  <div style={{ fontSize:14, color:rcol, letterSpacing:3 }}>REFLEX</div>
+                </div>
+                <div style={{ width:80 }} />
+              </div>
+            </div>
+
+            <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+
+            {/* ── INTRO ── */}
+            {reflexPhase==="intro"&&(
+              <div style={{ animation:"fadeIn 0.5s ease" }}>
+                <div style={{ textAlign:"center", marginBottom:24 }}>
+                  <div style={{ fontSize:56, marginBottom:8 }}>⚡</div>
+                  <h2 style={{ fontSize:32, color:rcol, letterSpacing:3, margin:"0 0 4px", textShadow:`0 0 20px ${rcol}44` }}>REFLEX</h2>
+                  <div style={{ color:mutedColor, fontSize:12, letterSpacing:3 }}>REACTION TIME TRAINER</div>
+                  {reflexPB&&<div style={{ marginTop:8, fontSize:12, color:"#ffcc00" }}>🏆 Personal Best: {reflexPB}ms</div>}
+                </div>
+
+                {/* How to play */}
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+                  <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>HOW TO PLAY</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {[
+                      { icon:"🔴", text:"Screen turns RED — wait..." },
+                      { icon:"🟢", text:"Screen turns GREEN — tap immediately!" },
+                      { icon:"⚡", text:"Your reaction time is recorded in ms" },
+                      { icon:"🚫", text:"Tap too early = round doesn't count" },
+                    ].map(({icon,text})=>(
+                      <div key={text} style={{ display:"flex", alignItems:"center", gap:12 }}>
+                        <span style={{ fontSize:20, flexShrink:0 }}>{icon}</span>
+                        <span style={{ fontSize:12, color:mutedColor }}>{text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Difficulty */}
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+                  <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>DIFFICULTY</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {[
+                      { key:"easy",   label:"EASY",   desc:"2–5 second delay · No fakes", col:"#00ff88" },
+                      { key:"medium", label:"MEDIUM", desc:"1.5–4 second delay · No fakes", col:"#ffcc00" },
+                      { key:"hard",   label:"HARD",   desc:"0.5–3.5 second delay · Fake flashes!", col:"#ff4466" },
+                    ].map(d=>{
+                      const sel = reflexDifficulty===d.key;
+                      return (
+                        <button key={d.key} onClick={()=>setReflexDifficulty(d.key)}
+                          style={{ background:sel?`${d.col}18`:"transparent", border:`2px solid ${sel?d.col:borderColor}`, borderRadius:10, padding:"12px 16px", cursor:"pointer", fontFamily:"inherit", textAlign:"left", display:"flex", alignItems:"center", gap:14, transition:"all 0.15s" }}>
+                          <div style={{ width:10, height:10, borderRadius:"50%", background:d.col, flexShrink:0 }} />
+                          <div>
+                            <div style={{ fontSize:12, color:sel?d.col:"#fff", letterSpacing:2 }}>{d.label}</div>
+                            <div style={{ fontSize:10, color:mutedColor, marginTop:2 }}>{d.desc}</div>
+                          </div>
+                          {sel&&<div style={{ marginLeft:"auto", color:d.col, fontSize:14 }}>✓</div>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Rounds */}
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:16 }}>
+                  <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>NUMBER OF ROUNDS</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
+                    {[5,10,15,20,25].map(n=>{
+                      const sel=reflexRounds===n;
+                      return <button key={n} onClick={()=>setReflexRounds(n)} style={{ background:sel?rcolLight:"transparent", border:`1px solid ${sel?rcol:borderColor}`, borderRadius:8, padding:"12px 4px", cursor:"pointer", fontFamily:"inherit", color:sel?rcol:mutedColor, fontSize:14, fontWeight:sel?"bold":"normal", minHeight:44 }}>{n}</button>;
+                    })}
+                  </div>
+                </div>
+
+                <button onClick={startReflexGame}
+                  style={{ width:"100%", background:"transparent", border:`2px solid ${rcol}`, color:rcol, padding:"18px", fontSize:16, letterSpacing:5, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 20px ${rcol}44`, transition:"all 0.2s", minHeight:58 }}
+                  onMouseEnter={e=>{e.currentTarget.style.background=rcolLight;}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+                  [ START ]
+                </button>
+              </div>
+            )}
+
+            {/* ── RESULT (after each round) ── */}
+            {reflexPhase==="result"&&(
+              <div style={{ animation:"popIn 0.3s ease", textAlign:"center" }} onClick={handleReflexTap}>
+                <div style={{ marginBottom:20 }}>
+                  <div style={{ fontSize:10, color:mutedColor, letterSpacing:4, marginBottom:8 }}>ROUND {reflexRoundIdx+1} / {reflexRounds}</div>
+
+                  {reflexResult==="early"?(
+                    <>
+                      <div style={{ fontSize:56, marginBottom:8 }}>🚫</div>
+                      <div style={{ fontSize:28, color:"#ff4466", letterSpacing:3, fontWeight:"bold" }}>TOO EARLY!</div>
+                      <div style={{ fontSize:13, color:mutedColor, marginTop:8 }}>You tapped before the screen turned green.</div>
+                      <div style={{ fontSize:12, color:"#ff446688", marginTop:4 }}>Round not counted.</div>
+                    </>
+                  ):(
+                    <>
+                      <div style={{ fontSize:"clamp(48px,14vw,72px)", color:rcol, fontWeight:"bold", letterSpacing:2, marginBottom:4 }}>{reflexResult}<span style={{ fontSize:"clamp(16px,4vw,22px)" }}>ms</span></div>
+                      {(()=>{ const r=reflexRating(reflexResult); return <div style={{ fontSize:16, color:r.color, letterSpacing:3, marginBottom:8 }}>{r.label}</div>; })()}
+                      {reflexTimes.length>1&&(
+                        <div style={{ fontSize:12, color:mutedColor, marginTop:4 }}>
+                          Avg so far: {Math.round(reflexTimes.reduce((a,b)=>a+b,0)/reflexTimes.length)}ms
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Round history mini-bars */}
+                {reflexTimes.length>0&&(
+                  <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"12px 16px", marginBottom:16 }}>
+                    <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:8 }}>ROUND HISTORY</div>
+                    <div style={{ display:"flex", gap:4, alignItems:"flex-end", height:40 }}>
+                      {reflexTimes.map((t,i)=>{
+                        const maxT=Math.max(...reflexTimes,400);
+                        const h=Math.round((t/maxT)*36)+4;
+                        const col=t<150?"#ffcc00":t<200?"#00ff88":t<250?"#00cfff":t<300?"#a78bfa":"#ff6b35";
+                        return <div key={i} style={{ flex:1, height:h, background:col, borderRadius:2, opacity:i===reflexTimes.length-1?1:0.6 }} />;
+                      })}
+                      {Array.from({length:reflexRounds-reflexTimes.length}).map((_,i)=>(
+                        <div key={"e"+i} style={{ flex:1, height:4, background:borderColor, borderRadius:2 }} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={handleReflexTap}
+                  style={{ width:"100%", background:rcolLight, border:`2px solid ${rcol}`, color:rcol, padding:"16px", fontSize:14, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:54 }}>
+                  {reflexRoundIdx+1>=reflexRounds?"SEE RESULTS →":"NEXT ROUND →"}
+                </button>
+              </div>
+            )}
+
+            {/* ── SUMMARY ── */}
+            {reflexPhase==="summary"&&(
+              <div style={{ animation:"fadeIn 0.5s ease" }}>
+                <div style={{ textAlign:"center", marginBottom:20 }}>
+                  <div style={{ fontSize:10, color:rcol, letterSpacing:6, marginBottom:8 }}>SESSION COMPLETE</div>
+                  <div style={{ fontSize:40, marginBottom:4 }}>⚡</div>
+                  <h2 style={{ fontSize:28, color:"#fff", margin:"0 0 4px", letterSpacing:2 }}>REFLEX DONE</h2>
+                  {avgTime&&(()=>{ const r=reflexRating(avgTime); return <div style={{ fontSize:14, color:r.color, letterSpacing:3 }}>{r.label}</div>; })()}
+                </div>
+
+                {/* Main stats */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+                  {[
+                    { label:"AVERAGE", val:avgTime?`${avgTime}ms`:"—", col:rcol, big:true },
+                    { label:"BEST", val:bestTime?`${bestTime}ms`:"—", col:"#00ff88", big:true },
+                    { label:"WORST", val:worstTime?`${worstTime}ms`:"—", col:"#ff4466", big:false },
+                    { label:"CONSISTENCY", val:consistencyScore!==null?`${consistencyScore}%`:"—", col:"#a78bfa", big:false },
+                    { label:"ROUNDS", val:`${validTimes.length}/${reflexRounds}`, col:"#ffcc00", big:false },
+                    { label:"PERSONAL BEST", val:reflexPB?`${reflexPB}ms`:"—", col:"#ffcc00", big:false },
+                  ].map(({label,val,col})=>(
+                    <div key={label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 12px", textAlign:"center" }}>
+                      <div style={{ fontSize:22, color:col, fontWeight:"bold" }}>{val}</div>
+                      <div style={{ fontSize:9, color:mutedColor, letterSpacing:2, marginTop:4 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Benchmarks */}
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 16px", marginBottom:12 }}>
+                  <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>REACTION TIME BENCHMARKS</div>
+                  {[
+                    { label:"⚡ ELITE", range:"< 150ms", col:"#ffcc00" },
+                    { label:"🌟 EXCELLENT", range:"150–200ms", col:"#00ff88" },
+                    { label:"✅ GOOD", range:"200–250ms", col:"#00cfff" },
+                    { label:"👍 AVERAGE", range:"250–300ms", col:"#a78bfa" },
+                    { label:"📈 KEEP TRAINING", range:"300ms+", col:"#ff6b35" },
+                  ].map(b=>{
+                    const isYours = avgTime && (
+                      (b.label.includes("ELITE")&&avgTime<150)||
+                      (b.label.includes("EXCELLENT")&&avgTime>=150&&avgTime<200)||
+                      (b.label.includes("GOOD")&&avgTime>=200&&avgTime<250)||
+                      (b.label.includes("AVERAGE")&&avgTime>=250&&avgTime<300)||
+                      (b.label.includes("KEEP")&&avgTime>=300)
+                    );
+                    return (
+                      <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${borderColor}`, background:isYours?`${b.col}10`:"transparent", borderRadius:4, paddingLeft:isYours?8:0 }}>
+                        <span style={{ fontSize:11, color:isYours?b.col:mutedColor }}>{b.label} {isYours?"← YOU":""}</span>
+                        <span style={{ fontSize:11, color:isYours?b.col:mutedColor }}>{b.range}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Round bar chart */}
+                {validTimes.length>0&&(
+                  <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 16px", marginBottom:14 }}>
+                    <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>ALL ROUNDS</div>
+                    <div style={{ display:"flex", gap:4, alignItems:"flex-end", height:60 }}>
+                      {reflexTimes.map((t,i)=>{
+                        const maxT=Math.max(...reflexTimes,400);
+                        const h=Math.round((t/maxT)*56)+4;
+                        const col=t<150?"#ffcc00":t<200?"#00ff88":t<250?"#00cfff":t<300?"#a78bfa":"#ff6b35";
+                        return (
+                          <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                            <div style={{ height:h, width:"100%", background:col, borderRadius:3 }} />
+                            <div style={{ fontSize:7, color:mutedColor }}>{i+1}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginTop:6 }}>
+                      <span style={{ fontSize:9, color:mutedColor }}>Best: {bestTime}ms</span>
+                      <span style={{ fontSize:9, color:mutedColor }}>Worst: {worstTime}ms</span>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display:"flex", gap:10 }}>
+                  <button onClick={()=>setReflexPhase("intro")}
+                    style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"16px", fontSize:13, letterSpacing:2, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:52 }}>
+                    SETTINGS
+                  </button>
+                  <button onClick={()=>{ setReflexTimes([]); setReflexRoundIdx(0); setReflexResult(null); startReflexGame(); }}
+                    style={{ flex:2, background:"transparent", border:`2px solid ${rcol}`, color:rcol, padding:"16px", fontSize:13, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 16px ${rcol}44`, minHeight:52 }}>
+                    PLAY AGAIN
+                  </button>
+                </div>
+              </div>
+            )}
+
+            </div>
+          </>
+        )}
       </div>
     );
   }
