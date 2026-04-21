@@ -1184,6 +1184,20 @@ function persistAll() {
   writeSave(save);
 }
 
+// ── Brain Score persistence ──
+const BS_KEY = "braintrain_brainscore";
+function loadBrainScoreHistory() {
+  try { const r=localStorage.getItem(BS_KEY); return r?JSON.parse(r):[]; } catch(e){return [];}
+}
+function saveBrainScoreEntry(entry) {
+  try {
+    const hist = loadBrainScoreHistory();
+    hist.push(entry);
+    if (hist.length>30) hist.shift(); // keep last 30 days
+    localStorage.setItem(BS_KEY, JSON.stringify(hist));
+  } catch(e){}
+}
+
 function recordStat(topic, correct) {
   if (!globalStats[topic]) globalStats[topic]={correct:0,total:0};
   globalStats[topic].total++; if (correct) globalStats[topic].correct++;
@@ -1338,6 +1352,68 @@ export default function MathGame() {
   const [reflexTimer, setReflexTimer] = useState(null);
   const [reflexDifficulty, setReflexDifficulty] = useState("medium");
   const [reflexPB, setReflexPB] = useState(() => { try { return JSON.parse(localStorage.getItem("braintrain_reflex_pb")||"null"); } catch(e){return null;} });
+
+  // ── Memory module state ──
+  const [memPhase, setMemPhase] = useState("intro");   // intro|show|recall|result|summary
+  const [memDiff, setMemDiff]   = useState("medium");
+  const [memRounds, setMemRounds] = useState(5);
+  const [memRoundIdx, setMemRoundIdx] = useState(0);
+  const [memNumbers, setMemNumbers] = useState([]);     // numbers to show
+  const [memGrid, setMemGrid]   = useState([]);         // grid cells: {num|null, pos}
+  const [memVisible, setMemVisible] = useState([]);     // which numbers still showing
+  const [memTapped, setMemTapped] = useState([]);       // player's taps in order
+  const [memNext, setMemNext]   = useState(1);          // next number player should tap
+  const [memErrors, setMemErrors] = useState(0);
+  const [memRoundResults, setMemRoundResults] = useState([]); // per-round {correct,total,errors}
+  const [memTimer, setMemTimer] = useState(null);
+  const [memCountdown, setMemCountdown] = useState(3);
+  const [memShowCountdown, setMemShowCountdown] = useState(false);
+  const [memRoundCorrect, setMemRoundCorrect] = useState(0);
+  const [memLives, setMemLives] = useState(3);
+
+  // ── Pattern module state ──
+  const [patPhase, setPatPhase]       = useState("intro"); // intro|question|feedback|summary
+  const [patDiff, setPatDiff]         = useState("medium");
+  const [patRounds, setPatRounds]     = useState(10);
+  const [patRoundIdx, setPatRoundIdx] = useState(0);
+  const [patQ, setPatQ]               = useState(null);   // current question
+  const [patSelected, setPatSelected] = useState(null);   // index player chose
+  const [patFeedback, setPatFeedback] = useState(null);   // "correct"|"wrong"
+  const [patScore, setPatScore]       = useState(0);
+  const [patStreak, setPatStreak]     = useState(0);
+  const [patCorrect, setPatCorrect]   = useState(0);
+  const [patRoundResults, setPatRoundResults] = useState([]);
+
+  // ── Brain Score dashboard state ──
+  const [showBrainScore, setShowBrainScore] = useState(false);
+
+  // ── Spatial Rotation module state ──
+  const [spatPhase, setSpatPhase]       = useState("intro");
+  const [spatDiff, setSpatDiff]         = useState("medium");
+  const [spatRounds, setSpatRounds]     = useState(10);
+  const [spatRoundIdx, setSpatRoundIdx] = useState(0);
+  const [spatQ, setSpatQ]               = useState(null);
+  const [spatSelected, setSpatSelected] = useState(null);
+  const [spatFeedback, setSpatFeedback] = useState(null);
+  const [spatScore, setSpatScore]       = useState(0);
+  const [spatStreak, setSpatStreak]     = useState(0);
+  const [spatCorrect, setSpatCorrect]   = useState(0);
+  const [spatResults, setSpatResults]   = useState([]);
+
+  // ── Dual N-Back state ──
+  const [dnPhase, setDnPhase]           = useState("intro");  // intro|playing|summary
+  const [dnN, setDnN]                   = useState(2);         // N level (1,2,3,4)
+  const [dnRounds, setDnRounds]         = useState(20);        // stimuli per session
+  const [dnIdx, setDnIdx]               = useState(0);         // current stimulus index
+  const [dnSequence, setDnSequence]     = useState([]);        // [{pos,letter}]
+  const [dnPosAnswered, setDnPosAnswered]   = useState(false); // user already tapped pos
+  const [dnLetAnswered, setDnLetAnswered]   = useState(false); // user already tapped letter
+  const [dnResults, setDnResults]       = useState([]);        // {posCorrect,letCorrect,posMatch,letMatch}
+  const [dnScore, setDnScore]           = useState(0);
+  const [dnShowStimulus, setDnShowStimulus] = useState(false); // true while stimulus on screen
+  const [dnTimer, setDnTimer]           = useState(null);
+  const [dnFeedback, setDnFeedback]     = useState(null);      // brief flash {pos,let}
+  const [dnHighScore, setDnHighScore]   = useState(()=>{ try{return JSON.parse(localStorage.getItem("bt_dnback_hs")||"null");}catch(e){return null;} });
 
   const [showOnboard, setShowOnboard] = useState(false); // only show when user triggers it
   const [playerName, setPlayerName] = useState(vocabSave.userName||"");
@@ -1718,6 +1794,501 @@ export default function MathGame() {
     return { label:"📈 KEEP TRAINING", color:"#ff6b35" };
   }
 
+  // ── Memory helpers ──
+  function memGetConfig() {
+    // returns { count, gridSize, showMs }
+    if (memDiff==="easy")   return { count:5,  gridSize:3, showMs:2500 };
+    if (memDiff==="medium") return { count:8,  gridSize:4, showMs:1800 };
+    if (memDiff==="hard")   return { count:12, gridSize:5, showMs:1200 };
+    return { count:5, gridSize:3, showMs:2500 };
+  }
+
+  function memBuildGrid(count, gridSize) {
+    const total = gridSize * gridSize;
+    const nums = Array.from({length: count}, (_, i) => i + 1);
+    // Shuffle positions
+    const positions = Array.from({length: total}, (_, i) => i).sort(() => Math.random() - 0.5);
+    const grid = Array(total).fill(null);
+    nums.forEach((n, i) => { grid[positions[i]] = n; });
+    return { grid, nums };
+  }
+
+  function startMemRound(roundIdx) {
+    const { count, gridSize, showMs } = memGetConfig();
+    const { grid, nums } = memBuildGrid(count, gridSize);
+    setMemNumbers(nums);
+    setMemGrid(grid);
+    setMemVisible(nums.slice()); // all visible at start
+    setMemTapped([]);
+    setMemNext(1);
+    setMemErrors(0);
+    setMemRoundCorrect(0);
+    setMemShowCountdown(true);
+    setMemCountdown(3);
+    // Countdown 3-2-1 then show
+    let cd = 3;
+    const cdInt = setInterval(() => {
+      cd--;
+      setMemCountdown(cd);
+      if (cd <= 0) {
+        clearInterval(cdInt);
+        setMemShowCountdown(false);
+        setMemPhase("show");
+        // After showMs, hide all and switch to recall
+        const t = setTimeout(() => {
+          setMemVisible([]);
+          setMemPhase("recall");
+        }, showMs);
+        setMemTimer(t);
+      }
+    }, 1000);
+  }
+
+  function handleMemTap(cellIdx) {
+    if (memPhase !== "recall") return;
+    const num = memGrid[cellIdx];
+    if (num === null) return; // empty cell
+    if (memTapped.includes(cellIdx)) return; // already tapped
+
+    if (num === memNext) {
+      // Correct
+      try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}
+      const newTapped = [...memTapped, cellIdx];
+      setMemTapped(newTapped);
+      setMemNext(memNext + 1);
+      setMemRoundCorrect(c => c + 1);
+
+      // Round complete when all numbers tapped correctly
+      const { count } = memGetConfig();
+      if (newTapped.length === count) {
+        finishMemRound(memErrors, count, count);
+      }
+    } else {
+      // Wrong
+      try{navigator.vibrate&&navigator.vibrate([80,30,80]);}catch(e){}
+      const newErrors = memErrors + 1;
+      setMemErrors(newErrors);
+      setMemLives(l => {
+        const nl = l - 1;
+        if (nl <= 0) {
+          // Out of lives — end round
+          const { count } = memGetConfig();
+          finishMemRound(newErrors, memRoundCorrect, count);
+        }
+        return nl;
+      });
+    }
+  }
+
+  function finishMemRound(errors, correct, total) {
+    clearTimeout(memTimer);
+    const xpEarned = errors===0 ? (memDiff==="easy"?10:memDiff==="medium"?18:28) :
+                     errors<=2  ? (memDiff==="easy"?5:memDiff==="medium"?10:16) : 2;
+    setXp(x => { const nx=x+xpEarned; globalXP=nx; persistAll(); return nx; });
+    setMemRoundResults(prev => [...prev, { correct, total, errors, perfect: errors===0 }]);
+    setMemPhase("result");
+  }
+
+  function advanceMemRound() {
+    const next = memRoundIdx + 1;
+    if (next >= memRounds) {
+      setMemPhase("summary");
+    } else {
+      setMemRoundIdx(next);
+      setMemLives(3);
+      startMemRound(next);
+    }
+  }
+
+  function startMemGame() {
+    setMemRoundIdx(0);
+    setMemRoundResults([]);
+    setMemTapped([]);
+    setMemErrors(0);
+    setMemLives(3);
+    startMemRound(0);
+  }
+
+  // ── Pattern helpers ──
+  function patMakeQuestion(diff) {
+    const type = Math.floor(Math.random() * (diff==="easy"?3:diff==="medium"?5:7));
+    // Each generator returns { sequence:[], answer, choices:[], explanation }
+    let seq, answer, choices, explanation, label;
+
+    if (type===0) {
+      // Arithmetic sequence
+      const start = rand(1, diff==="easy"?10:diff==="medium"?20:50);
+      const step  = rand(2, diff==="easy"?5:diff==="medium"?10:20) * (Math.random()<0.3?-1:1);
+      const len   = diff==="easy"?4:diff==="medium"?5:6;
+      seq = Array.from({length:len}, (_,i) => start + step*i);
+      answer = start + step*len;
+      explanation = `Each term ${step>0?"increases by":"decreases by"} ${Math.abs(step)}`;
+      label = "NUMBER SEQUENCE";
+    } else if (type===1) {
+      // Geometric sequence
+      const start = rand(1,8);
+      const ratio = rand(2, diff==="easy"?3:5);
+      const len   = diff==="easy"?4:5;
+      seq = Array.from({length:len}, (_,i) => start * Math.pow(ratio,i));
+      answer = seq[seq.length-1] * ratio;
+      explanation = `Each term is multiplied by ${ratio}`;
+      label = "MULTIPLY SEQUENCE";
+    } else if (type===2) {
+      // Fibonacci-style
+      const a = rand(1,5), b = rand(a+1, a+6);
+      seq = [a, b];
+      for (let i=2; i<(diff==="easy"?5:6); i++) seq.push(seq[i-1]+seq[i-2]);
+      answer = seq[seq.length-1] + seq[seq.length-2];
+      seq = seq.slice(0,-1);
+      explanation = "Each term = sum of the two before it";
+      label = "SUM SEQUENCE";
+    } else if (type===3) {
+      // Squares
+      const start = rand(1, diff==="medium"?7:10);
+      const len = 5;
+      seq = Array.from({length:len}, (_,i) => Math.pow(start+i,2));
+      answer = Math.pow(start+len,2);
+      explanation = `Sequence of perfect squares: ${start}², ${start+1}², ...`;
+      label = "SQUARE SEQUENCE";
+    } else if (type===4) {
+      // Alternating add/multiply
+      const start = rand(2,8);
+      const addStep = rand(2,5);
+      const mulStep = rand(2,3);
+      seq = [start];
+      for (let i=0; i<4; i++) {
+        if (i%2===0) seq.push(seq[seq.length-1]+addStep);
+        else seq.push(seq[seq.length-1]*mulStep);
+      }
+      answer = seq.length%2===0 ? seq[seq.length-1]+addStep : seq[seq.length-1]*mulStep;
+      explanation = `Alternates: +${addStep}, ×${mulStep}, +${addStep}, ×${mulStep}...`;
+      label = "ALTERNATING PATTERN";
+    } else if (type===5) {
+      // Prime numbers
+      const primes = [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47];
+      const start = rand(0,8);
+      seq = primes.slice(start, start+5);
+      answer = primes[start+5];
+      explanation = "Sequence of prime numbers";
+      label = "PRIME SEQUENCE";
+    } else {
+      // Difference of differences (2nd order)
+      const start = rand(1,10);
+      const d1 = rand(1,5);
+      const d2 = rand(1,4);
+      seq = [start, start+d1];
+      for (let i=2; i<6; i++) {
+        const prevDiff = seq[i-1]-seq[i-2];
+        seq.push(seq[i-1]+prevDiff+d2);
+      }
+      answer = seq.pop();
+      explanation = "The differences between terms increase by a fixed amount";
+      label = "2ND ORDER SEQUENCE";
+    }
+
+    // Generate wrong choices: answer ± spread, no duplicates, no negatives
+    const spread = Math.max(3, Math.floor(Math.abs(answer)*0.2));
+    const wrongSet = new Set();
+    let attempts = 0;
+    while (wrongSet.size < 3 && attempts < 200) {
+      attempts++;
+      const delta = rand(-spread, spread);
+      const w = answer + (delta===0 ? rand(1,4) : delta);
+      if (w!==answer && w>0 && !wrongSet.has(w)) wrongSet.add(w);
+    }
+    choices = [...wrongSet, answer].sort(() => Math.random()-0.5);
+    return { seq, answer, choices, explanation, label };
+  }
+
+  function loadPatQuestion() {
+    setPatQ(patMakeQuestion(patDiff));
+    setPatSelected(null);
+    setPatFeedback(null);
+  }
+
+  function handlePatAnswer(choiceIdx) {
+    if (patFeedback) return;
+    const chosen = patQ.choices[choiceIdx];
+    const correct = chosen === patQ.answer;
+    setPatSelected(choiceIdx);
+    setPatFeedback(correct ? "correct" : "wrong");
+    if (correct) {
+      try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}
+      const xp = patDiff==="easy"?5:patDiff==="medium"?10:18;
+      const bonus = patStreak>=4?4:patStreak>=2?2:0;
+      setXp(x=>{ const nx=x+xp+bonus; globalXP=nx; persistAll(); return nx; });
+      setPatScore(s=>s+10+(patStreak*2));
+      setPatStreak(s=>s+1);
+      setPatCorrect(c=>c+1);
+    } else {
+      try{navigator.vibrate&&navigator.vibrate([80,30,80]);}catch(e){}
+      setPatStreak(0);
+    }
+    setPatRoundResults(prev=>[...prev,{correct, answer:patQ.answer, chosen, label:patQ.label}]);
+  }
+
+  function advancePatRound() {
+    const next = patRoundIdx+1;
+    if (next>=patRounds) {
+      setPatPhase("summary");
+    } else {
+      setPatRoundIdx(next);
+      loadPatQuestion();
+    }
+  }
+
+  function startPatGame() {
+    setPatScore(0); setPatStreak(0); setPatCorrect(0);
+    setPatRoundResults([]); setPatRoundIdx(0);
+    setPatPhase("question");
+    setPatQ(patMakeQuestion(patDiff));
+    setPatSelected(null); setPatFeedback(null);
+  }
+
+  // ── Brain Score calculator ──
+  function calcBrainScore() {
+    // Returns object with scores 0-100 per domain and overall 0-1000
+    // MATH domain: from globalStats
+    const mathTopics = Object.values(globalStats);
+    const mathScore = mathTopics.length>0
+      ? Math.min(100, Math.round(mathTopics.reduce((s,v)=>s+(v.correct/v.total)*100,0)/mathTopics.length))
+      : 0;
+
+    // VOCAB domain: from vocabSave
+    const totalWords = VOCAB_WORDS.length;
+    const masteredWords = (vocabSave.masteredWords||[]).length;
+    const seenWords = (vocabSave.seenWords||[]).length;
+    const vocabScore = Math.min(100, Math.round((masteredWords/totalWords)*60 + (seenWords/totalWords)*40));
+
+    // MEMORY domain: from localStorage session history
+    const memPct = memRoundResults.length>0
+      ? Math.round(memRoundResults.reduce((s,r)=>s+(r.correct/r.total),0)/memRoundResults.length*100)
+      : 0;
+
+    // REFLEX domain: from PB
+    const reflexScore = reflexPB
+      ? Math.min(100, Math.max(0, Math.round(((400-reflexPB)/250)*100)))
+      : 0;
+
+    // PATTERN domain: from last session
+    const patPct = patResults_for_score();
+
+    // SPATIAL domain: from last session
+    const spatPct = spatResults.length>0
+      ? Math.round((spatCorrect/spatResults.length)*100)
+      : 0;
+
+    const dnValid = dnResults.filter(r=>r!==null); const dnAcc = dnValid.length>0 ? Math.round((dnValid.filter(r=>r.posCorrect).length+dnValid.filter(r=>r.letCorrect).length)/(dnValid.length*2)*100) : 0;
+    const domains = { math:mathScore, vocab:vocabScore, memory:memPct, reflex:reflexScore, pattern:patPct, spatial:spatPct, dualnback:dnAcc };
+    const activeDomains = Object.values(domains).filter(v=>v>0);
+    const overall = activeDomains.length>0
+      ? Math.round(activeDomains.reduce((s,v)=>s+v,0)/6 * 10) // scale to 0-1000
+      : 0;
+    return { domains, overall };
+  }
+
+  function patResults_for_score() {
+    if (patRoundResults.length===0) return 0;
+    return Math.round(patRoundResults.filter(r=>r.correct).length/patRoundResults.length*100);
+  }
+
+  // ── Spatial Rotation helpers ──
+  // Shapes are represented as arrays of [x,y] offsets from center
+  // We draw them on a small grid (5x5)
+  const SPAT_SHAPES = [
+    [[0,0],[1,0],[2,0],[0,1]],         // L
+    [[0,0],[1,0],[2,0],[2,1]],         // J
+    [[0,0],[1,0],[1,1],[2,1]],         // S
+    [[0,1],[1,1],[1,0],[2,0]],         // Z
+    [[0,0],[1,0],[2,0],[1,1]],         // T
+    [[0,0],[1,0],[0,1],[1,1]],         // O
+    [[0,0],[1,0],[2,0],[3,0]],         // I
+    [[0,0],[0,1],[1,1],[1,2]],         // tall-S
+    [[0,0],[1,0],[2,0],[0,1],[0,2]],   // corner-L
+    [[0,0],[1,0],[2,0],[2,1],[2,2]],   // corner-J
+    [[0,0],[1,0],[1,1],[1,2],[2,2]],   // Z-long
+    [[0,2],[1,2],[1,1],[1,0],[2,0]],   // S-long
+  ];
+
+  function rotatePts(pts, times) {
+    let p = pts.map(([x,y])=>[x,y]);
+    for (let t=0;t<times;t++) {
+      // 90deg CW: [x,y] -> [y, -x]  then normalise
+      p = p.map(([x,y])=>[y,-x]);
+      const minX = Math.min(...p.map(([x])=>x));
+      const minY = Math.min(...p.map(([,y])=>y));
+      p = p.map(([x,y])=>[x-minX,y-minY]);
+    }
+    return p;
+  }
+
+  function spatMakeQuestion(diff) {
+    const shapeIdx = rand(0, SPAT_SHAPES.length-1);
+    const base = SPAT_SHAPES[shapeIdx];
+    const correctRot = rand(0,3); // 0,1,2,3 = 0°,90°,180°,270°
+    const correctPts = rotatePts(base, correctRot);
+
+    // Generate 3 wrong rotations — pick rotations different from correct
+    const allRots = [0,1,2,3];
+    const wrongRots = allRots.filter(r=>r!==correctRot).sort(()=>Math.random()-0.5);
+
+    // In hard mode also add a mirrored shape as a distractor
+    const distractorRots = diff==="hard"
+      ? [wrongRots[0], wrongRots[1], (correctRot+2)%4] // includes 180° as harder distractor
+      : wrongRots.slice(0,3);
+
+    const choices = [
+      { pts: correctPts, isCorrect: true },
+      ...distractorRots.map(r=>({ pts: rotatePts(base, r), isCorrect: false }))
+    ].sort(()=>Math.random()-0.5);
+
+    return { base, choices, correctPts };
+  }
+
+  function handleSpatAnswer(idx) {
+    if (spatFeedback) return;
+    const correct = spatQ.choices[idx].isCorrect;
+    setSpatSelected(idx);
+    setSpatFeedback(correct?"correct":"wrong");
+    if (correct) {
+      try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}
+      const xp = spatDiff==="easy"?6:spatDiff==="medium"?12:20;
+      setXp(x=>{ const nx=x+xp; globalXP=nx; persistAll(); return nx; });
+      setSpatScore(s=>s+10+(spatStreak*2));
+      setSpatStreak(s=>s+1);
+      setSpatCorrect(c=>c+1);
+    } else {
+      try{navigator.vibrate&&navigator.vibrate([80,30,80]);}catch(e){}
+      setSpatStreak(0);
+    }
+    setSpatResults(prev=>[...prev,{correct}]);
+  }
+
+  function advanceSpatRound() {
+    const next = spatRoundIdx+1;
+    if (next>=spatRounds) { setSpatPhase("summary"); return; }
+    setSpatRoundIdx(next);
+    setSpatQ(spatMakeQuestion(spatDiff));
+    setSpatSelected(null);
+    setSpatFeedback(null);
+  }
+
+  function startSpatGame() {
+    setSpatScore(0); setSpatStreak(0); setSpatCorrect(0);
+    setSpatResults([]); setSpatRoundIdx(0);
+    setSpatQ(spatMakeQuestion(spatDiff));
+    setSpatSelected(null); setSpatFeedback(null);
+    setSpatPhase("question");
+  }
+
+  // Helper: render a shape as a mini SVG grid (5x5 cells)
+  function renderShape(pts, col, size=80) {
+    const cell = size/5;
+    const maxX = Math.max(...pts.map(([x])=>x));
+    const maxY = Math.max(...pts.map(([,y])=>y));
+    const offX = Math.floor((5-maxX-1)/2);
+    const offY = Math.floor((5-maxY-1)/2);
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{display:"block"}}>
+        {pts.map(([x,y],i)=>(
+          <rect key={i}
+            x={(x+offX)*cell+1} y={(y+offY)*cell+1}
+            width={cell-2} height={cell-2}
+            rx={2}
+            fill={col+"33"} stroke={col} strokeWidth={1.5}
+          />
+        ))}
+      </svg>
+    );
+  }
+
+  // ── Dual N-Back helpers ──
+  const DN_LETTERS = ["C","H","K","L","Q","R","S","T"];  // 8 consonants — easy to distinguish
+  const DN_GRID    = 9;  // 3×3 grid positions 0-8
+
+  function dnBuildSequence(n, rounds) {
+    // Build sequence ensuring ~33% position matches and ~33% letter matches
+    const seq = [];
+    for (let i=0; i<rounds; i++) {
+      if (i < n) {
+        seq.push({ pos: Math.floor(Math.random()*DN_GRID), letter: DN_LETTERS[Math.floor(Math.random()*DN_LETTERS.length)] });
+      } else {
+        const matchPos = Math.random() < 0.33;
+        const matchLet = Math.random() < 0.33;
+        seq.push({
+          pos:    matchPos ? seq[i-n].pos    : (() => { let p; do { p=Math.floor(Math.random()*DN_GRID); } while(p===seq[i-n].pos); return p; })(),
+          letter: matchLet ? seq[i-n].letter : (() => { let l; do { l=DN_LETTERS[Math.floor(Math.random()*DN_LETTERS.length)]; } while(l===seq[i-n].letter); return l; })(),
+        });
+      }
+    }
+    return seq;
+  }
+
+  function startDnGame() {
+    const seq = dnBuildSequence(dnN, dnRounds);
+    setDnSequence(seq);
+    setDnIdx(0);
+    setDnResults([]);
+    setDnScore(0);
+    setDnPosAnswered(false);
+    setDnLetAnswered(false);
+    setDnFeedback(null);
+    setDnPhase("playing");
+    // start first stimulus after short delay
+    setTimeout(() => dnShowNext(seq, 0, dnN), 600);
+  }
+
+  function dnShowNext(seq, idx, n) {
+    if (idx >= seq.length) {
+      setDnPhase("summary");
+      return;
+    }
+    setDnShowStimulus(true);
+    setDnPosAnswered(false);
+    setDnLetAnswered(false);
+    setDnFeedback(null);
+    setDnIdx(idx);
+    // Stimulus on screen for 2500ms, then inter-stimulus interval 500ms
+    const t = setTimeout(() => {
+      setDnShowStimulus(false);
+      // score this trial (only valid from index n onwards)
+      if (idx >= n) {
+        // scoring done when stimulus disappears
+      }
+      // advance after ISI
+      setTimeout(() => {
+        dnShowNext(seq, idx+1, n);
+      }, 500);
+    }, 2500);
+    setDnTimer(t);
+  }
+
+  function handleDnResponse(type) {
+    // type = "pos" | "let"
+    if (!dnShowStimulus) return;
+    if (type==="pos" && dnPosAnswered) return;
+    if (type==="let" && dnLetAnswered) return;
+    if (type==="pos") setDnPosAnswered(true);
+    if (type==="let") setDnLetAnswered(true);
+  }
+
+  // Score a trial at end of stimulus — called via useEffect watching dnShowStimulus
+  // We track results per-trial including misses
+  function dnScoreTrial(seq, idx, n, posAnswered, letAnswered) {
+    if (idx < n) return null;
+    const posMatch  = seq[idx].pos    === seq[idx-n].pos;
+    const letMatch  = seq[idx].letter === seq[idx-n].letter;
+    const posHit    = posMatch  && posAnswered;
+    const posFA     = !posMatch && posAnswered;   // false alarm
+    const letHit    = letMatch  && letAnswered;
+    const letFA     = !letMatch && letAnswered;
+    const posMiss   = posMatch  && !posAnswered;
+    const letMiss   = letMatch  && !letAnswered;
+    const posCorrect = posHit || (!posMatch && !posAnswered);
+    const letCorrect = letHit || (!letMatch && !letAnswered);
+    return { posMatch, letMatch, posAnswered, letAnswered, posCorrect, letCorrect, posHit, letHit, posFA, letFA, posMiss, letMiss };
+  }
+
   function handleStart() {
     if (isReview && missedQuestions.length === 0) {
       setInputError("No wrong answers yet! Play other modes first to build your review list.");
@@ -1756,6 +2327,19 @@ export default function MathGame() {
 
   // ── Load question on game start ──
   useEffect(() => { if (screen==="game") loadQuestion(levelIdx); }, [screen,levelIdx,loadQuestion]);
+
+  // ── Dual N-Back: score trial when stimulus disappears ──
+  useEffect(() => {
+    if (appMode==="dualnback" && dnPhase==="playing" && !dnShowStimulus && dnSequence.length>0 && dnIdx>=dnN) {
+      const result = dnScoreTrial(dnSequence, dnIdx, dnN, dnPosAnswered, dnLetAnswered);
+      if (result) {
+        setDnResults(prev=>[...prev, result]);
+        const pts = (result.posCorrect?10:0)+(result.letCorrect?10:0);
+        if (pts>0) setDnScore(s=>s+pts);
+        setDnFeedback({ pos:result.posCorrect?"correct":result.posMatch?"miss":"ok", let:result.letCorrect?"correct":result.letMatch?"miss":"ok" });
+      }
+    }
+  }, [dnShowStimulus, dnIdx, appMode, dnPhase]);
 
   // ── Load vocab question when vocab game starts or question is null ──
   useEffect(() => {
@@ -2118,34 +2702,90 @@ export default function MathGame() {
           </div>
         </div>
 
-        <div style={{ display:"flex", flexDirection:"column", gap:14, marginBottom:24 }}>
-          <button onClick={()=>{setAppMode("math");setScreen("intro");}} style={{ background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"clamp(20px,5vw,28px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00ff8844", transition:"all 0.2s", minHeight:"clamp(85px,22vw,100px)" }}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:24 }}>
+          {/* Math */}
+          <button onClick={()=>{setAppMode("math");setScreen("intro");}}
+            style={{ background:"transparent", border:"2px solid #00ff88", color:"#00ff88", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #00ff8833", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#00ff8818";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <div style={{ fontSize:36, marginBottom:8 }}>🧮</div>
-            <div>MATH TRAINING</div>
-            <div style={{ fontSize:11, color:"#00ff8899", marginTop:4, letterSpacing:1 }}>Arithmetic · Algebra · Advanced · Audio · Drill · Review</div>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>🧮</div>
+            <div style={{ fontWeight:"bold" }}>MATH</div>
+            <div style={{ fontSize:9, color:"#00ff8888", marginTop:3, letterSpacing:0 }}>Arithmetic · Algebra</div>
           </button>
-          <button onClick={()=>startSudoku()} style={{ background:"transparent", border:"2px solid #00cfff", color:"#00cfff", padding:"clamp(18px,4.5vw,24px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #00cfff44", transition:"all 0.2s", minHeight:"clamp(78px,20vw,90px)" }}
-            onMouseEnter={e=>{e.currentTarget.style.background="#00cfff18";}}
-            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <div style={{ fontSize:32, marginBottom:8 }}>🔢</div>
-            <div>SUDOKU</div>
-            <div style={{ fontSize:11, color:"#00cfff99", marginTop:4, letterSpacing:1 }}>Logic · Pattern · Deduction</div>
-          </button>
-          <button onClick={()=>{setAppMode("vocab");setVocabScreen("intro");}} style={{ background:"transparent", border:"2px solid #a78bfa", color:"#a78bfa", padding:"clamp(18px,4.5vw,24px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #a78bfa44", transition:"all 0.2s", minHeight:"clamp(78px,20vw,90px)" }}
+          {/* Vocab */}
+          <button onClick={()=>{setAppMode("vocab");setVocabScreen("intro");}}
+            style={{ background:"transparent", border:"2px solid #a78bfa", color:"#a78bfa", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #a78bfa33", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#a78bfa18";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <div style={{ fontSize:32, marginBottom:8 }}>📚</div>
-            <div>VOCABULARY</div>
-            <div style={{ fontSize:11, color:"#a78bfa99", marginTop:4, letterSpacing:1 }}>Words · Meanings · Spelling · Antonyms</div>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>📚</div>
+            <div style={{ fontWeight:"bold" }}>VOCAB</div>
+            <div style={{ fontSize:9, color:"#a78bfa88", marginTop:3, letterSpacing:0 }}>Words · Meanings</div>
           </button>
-          <button onClick={()=>{setAppMode("reflex");setReflexPhase("intro");setReflexTimes([]);setReflexRoundIdx(0);}} style={{ background:"transparent", border:"2px solid #ff6b35", color:"#ff6b35", padding:"clamp(18px,4.5vw,24px) 20px", fontSize:"clamp(13px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #ff6b3544", transition:"all 0.2s", minHeight:"clamp(78px,20vw,90px)" }}
+          {/* Sudoku */}
+          <button onClick={()=>startSudoku()}
+            style={{ background:"transparent", border:"2px solid #00cfff", color:"#00cfff", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #00cfff33", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#00cfff18";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>🔢</div>
+            <div style={{ fontWeight:"bold" }}>SUDOKU</div>
+            <div style={{ fontSize:9, color:"#00cfff88", marginTop:3, letterSpacing:0 }}>Logic · Deduction</div>
+          </button>
+          {/* Reflex */}
+          <button onClick={()=>{setAppMode("reflex");setReflexPhase("intro");setReflexTimes([]);setReflexRoundIdx(0);}}
+            style={{ background:"transparent", border:"2px solid #ff6b35", color:"#ff6b35", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #ff6b3533", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
             onMouseEnter={e=>{e.currentTarget.style.background="#ff6b3518";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <div style={{ fontSize:32, marginBottom:8 }}>⚡</div>
-            <div>REFLEX</div>
-            <div style={{ fontSize:11, color:"#ff6b3599", marginTop:4, letterSpacing:1 }}>Reaction Time · Speed · Impulse Control</div>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>⚡</div>
+            <div style={{ fontWeight:"bold" }}>REFLEX</div>
+            <div style={{ fontSize:9, color:"#ff6b3588", marginTop:3, letterSpacing:0 }}>Reaction · Speed</div>
+          </button>
+          {/* Memory */}
+          <button onClick={()=>{setAppMode("memory");setMemPhase("intro");setMemRoundResults([]);setMemRoundIdx(0);}}
+            style={{ background:"transparent", border:"2px solid #f59e0b", color:"#f59e0b", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #f59e0b33", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#f59e0b18";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>🧠</div>
+            <div style={{ fontWeight:"bold" }}>MEMORY</div>
+            <div style={{ fontSize:9, color:"#f59e0b88", marginTop:3, letterSpacing:0 }}>Sequence · Spatial</div>
+          </button>
+          {/* Pattern */}
+          <button onClick={()=>{setAppMode("pattern");setPatPhase("intro");setPatRoundResults([]);setPatRoundIdx(0);}}
+            style={{ background:"transparent", border:"2px solid #ec4899", color:"#ec4899", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #ec489933", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#ec489918";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>🎨</div>
+            <div style={{ fontWeight:"bold" }}>PATTERN</div>
+            <div style={{ fontSize:9, color:"#ec489988", marginTop:3, letterSpacing:0 }}>Logic · Sequences</div>
+          </button>
+          {/* Spatial */}
+          <button onClick={()=>{setAppMode("spatial");setSpatPhase("intro");setSpatResults([]);setSpatRoundIdx(0);}}
+            style={{ background:"transparent", border:"2px solid #06b6d4", color:"#06b6d4", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #06b6d433", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#06b6d418";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>🌀</div>
+            <div style={{ fontWeight:"bold" }}>SPATIAL</div>
+            <div style={{ fontSize:9, color:"#06b6d488", marginTop:3, letterSpacing:0 }}>Rotation · 3D Thinking</div>
+          </button>
+          {/* Dual N-Back */}
+          <button onClick={()=>{setAppMode("dualnback");setDnPhase("intro");setDnResults([]);setDnIdx(0);}}
+            style={{ background:"transparent", border:"2px solid #8b5cf6", color:"#8b5cf6", padding:"18px 10px", fontSize:"clamp(11px,3vw,13px)", letterSpacing:2, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 16px #8b5cf633", transition:"all 0.2s", minHeight:"clamp(100px,26vw,120px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#8b5cf618";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <div style={{ fontSize:"clamp(26px,7vw,34px)", marginBottom:6 }}>🔮</div>
+            <div style={{ fontWeight:"bold" }}>DUAL N-BACK</div>
+            <div style={{ fontSize:9, color:"#8b5cf688", marginTop:3, letterSpacing:0 }}>Working Memory · Focus</div>
+          </button>
+          {/* Brain Score — full width */}
+          <button onClick={()=>setShowBrainScore(true)}
+            style={{ gridColumn:"1/-1", background:"linear-gradient(135deg,#1a3040,#0a1520)", border:"2px solid #ffcc00", color:"#ffcc00", padding:"16px 20px", fontSize:"clamp(12px,3.5vw,15px)", letterSpacing:3, cursor:"pointer", borderRadius:12, fontFamily:"inherit", boxShadow:"0 0 20px #ffcc0033", transition:"all 0.2s", minHeight:64, display:"flex", alignItems:"center", justifyContent:"center", gap:12 }}
+            onMouseEnter={e=>{e.currentTarget.style.background="linear-gradient(135deg,#ffcc0018,#1a3040)";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="linear-gradient(135deg,#1a3040,#0a1520)";}}>
+            <span style={{ fontSize:26 }}>🏆</span>
+            <div style={{ textAlign:"left" }}>
+              <div style={{ fontWeight:"bold", letterSpacing:3 }}>BRAIN SCORE DASHBOARD</div>
+              <div style={{ fontSize:9, color:"#ffcc0088", marginTop:2, letterSpacing:1 }}>Your cognitive profile across all modules</div>
+            </div>
+            <span style={{ marginLeft:"auto", fontSize:18 }}>→</span>
           </button>
         </div>
 
@@ -2195,6 +2835,157 @@ export default function MathGame() {
             ))}
           </div>
         )}
+
+        {/* ── BRAIN SCORE DASHBOARD OVERLAY ── */}
+        {showBrainScore&&(()=>{
+          const bs = calcBrainScore();
+          const history = loadBrainScoreHistory();
+          const domainConfig = [
+            { key:"math",    label:"MATH",    icon:"🧮", col:"#00ff88" },
+            { key:"dualnback",label:"N-BACK",  icon:"🔮", col:"#8b5cf6" },
+            { key:"vocab",   label:"VOCAB",   icon:"📚", col:"#a78bfa" },
+            { key:"memory",  label:"MEMORY",  icon:"🧠", col:"#f59e0b" },
+            { key:"reflex",  label:"REFLEX",  icon:"⚡", col:"#ff6b35" },
+            { key:"pattern", label:"PATTERN", icon:"🎨", col:"#ec4899" },
+            { key:"spatial", label:"SPATIAL", icon:"🌀", col:"#06b6d4" },
+          ];
+          return (
+            <div style={{ position:"fixed",inset:0,background:"#050a0fee",zIndex:200,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"max(env(safe-area-inset-top),20px) max(12px,3.5vw) max(env(safe-area-inset-bottom),20px)" }}>
+              <div style={{ maxWidth:"min(480px,100%)",margin:"0 auto",animation:"fadeIn 0.4s ease" }}>
+                {/* Header */}
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+                  <div>
+                    <div style={{ fontSize:10,color:"#ffcc00",letterSpacing:4 }}>COGNITIVE PROFILE</div>
+                    <h2 style={{ fontSize:26,color:"#fff",margin:0,letterSpacing:2 }}>🏆 BRAIN SCORE</h2>
+                  </div>
+                  <button onClick={()=>setShowBrainScore(false)} style={{ background:"transparent",border:`1px solid ${borderColor}`,color:mutedColor,padding:"12px 16px",fontSize:13,cursor:"pointer",borderRadius:8,fontFamily:"inherit",minHeight:44 }}>✕ CLOSE</button>
+                </div>
+
+                {/* Overall score */}
+                <div style={{ background:"linear-gradient(135deg,#1a3040,#0a1520)",border:"2px solid #ffcc00",borderRadius:14,padding:"24px 20px",marginBottom:16,textAlign:"center" }}>
+                  <div style={{ fontSize:9,color:"#ffcc0088",letterSpacing:4,marginBottom:8 }}>OVERALL BRAIN SCORE</div>
+                  <div style={{ fontSize:72,color:"#ffcc00",fontWeight:"bold",lineHeight:1,marginBottom:4 }}>{bs.overall}</div>
+                  <div style={{ fontSize:10,color:mutedColor,letterSpacing:2 }}>OUT OF 1000</div>
+                  <div style={{ height:8,background:"#1a3040",borderRadius:4,overflow:"hidden",marginTop:14 }}>
+                    <div style={{ height:"100%",width:`${bs.overall/10}%`,background:"linear-gradient(90deg,#ffcc00,#ff6b35)",borderRadius:4,transition:"width 1s" }} />
+                  </div>
+                  <div style={{ fontSize:11,color:"#ffcc00",marginTop:8 }}>
+                    {bs.overall>=800?"🏆 ELITE COGNITIVE ATHLETE":bs.overall>=600?"⭐ ADVANCED THINKER":bs.overall>=400?"✅ SOLID PERFORMER":bs.overall>=200?"📈 DEVELOPING SKILLS":"🌱 JUST GETTING STARTED — KEEP GOING!"}
+                  </div>
+                </div>
+
+                {/* Domain radar — 6 bars */}
+                <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
+                  <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:14 }}>DOMAIN BREAKDOWN</div>
+                  <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+                    {domainConfig.map(d=>{
+                      const score = bs.domains[d.key] || 0;
+                      return (
+                        <div key={d.key}>
+                          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5 }}>
+                            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                              <span style={{ fontSize:16 }}>{d.icon}</span>
+                              <span style={{ fontSize:11,color:"#fff",letterSpacing:2 }}>{d.label}</span>
+                            </div>
+                            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                              <span style={{ fontSize:11,color:score>0?d.col:mutedColor }}>{score>0?`${score}%`:"—"}</span>
+                              {score===0&&<span style={{ fontSize:9,color:mutedColor }}>not played</span>}
+                            </div>
+                          </div>
+                          <div style={{ height:8,background:"#0a1520",borderRadius:4,overflow:"hidden" }}>
+                            <div style={{ height:"100%",width:`${score}%`,background:d.col,borderRadius:4,transition:"width 0.8s",boxShadow:`0 0 8px ${d.col}66` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Strengths & Weaknesses */}
+                {(()=>{
+                  const played = domainConfig.filter(d=>bs.domains[d.key]>0);
+                  if (played.length<2) return (
+                    <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"14px 18px",marginBottom:14,textAlign:"center" }}>
+                      <div style={{ fontSize:12,color:mutedColor }}>Play more modules to see your strengths and weaknesses</div>
+                    </div>
+                  );
+                  const sorted = [...played].sort((a,b)=>bs.domains[b.key]-bs.domains[a.key]);
+                  const best = sorted[0];
+                  const worst = sorted[sorted.length-1];
+                  return (
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+                      <div style={{ background:cardBg,border:`1px solid ${best.col}44`,borderRadius:10,padding:"14px 12px",textAlign:"center" }}>
+                        <div style={{ fontSize:9,color:mutedColor,letterSpacing:2,marginBottom:6 }}>💪 STRENGTH</div>
+                        <div style={{ fontSize:24 }}>{best.icon}</div>
+                        <div style={{ fontSize:11,color:best.col,marginTop:4,letterSpacing:2 }}>{best.label}</div>
+                        <div style={{ fontSize:16,color:best.col,fontWeight:"bold",marginTop:2 }}>{bs.domains[best.key]}%</div>
+                      </div>
+                      <div style={{ background:cardBg,border:`1px solid ${worst.col}44`,borderRadius:10,padding:"14px 12px",textAlign:"center" }}>
+                        <div style={{ fontSize:9,color:mutedColor,letterSpacing:2,marginBottom:6 }}>📈 FOCUS ON</div>
+                        <div style={{ fontSize:24 }}>{worst.icon}</div>
+                        <div style={{ fontSize:11,color:worst.col,marginTop:4,letterSpacing:2 }}>{worst.label}</div>
+                        <div style={{ fontSize:16,color:worst.col,fontWeight:"bold",marginTop:2 }}>{bs.domains[worst.key]}%</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Score history */}
+                {history.length>1&&(
+                  <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"14px 18px",marginBottom:14 }}>
+                    <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:12 }}>SCORE HISTORY</div>
+                    <div style={{ display:"flex",gap:3,alignItems:"flex-end",height:48 }}>
+                      {history.slice(-15).map((h,i)=>{
+                        const h2 = Math.round((h.overall/1000)*44)+4;
+                        const isLast = i===Math.min(history.length,15)-1;
+                        return <div key={i} style={{ flex:1,height:h2,background:isLast?"#ffcc00":"#ffcc0044",borderRadius:2 }} />;
+                      })}
+                    </div>
+                    <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
+                      <span style={{ fontSize:9,color:mutedColor }}>Past sessions</span>
+                      <span style={{ fontSize:9,color:"#ffcc00" }}>Today: {bs.overall}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick play suggestions */}
+                <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"14px 18px",marginBottom:16 }}>
+                  <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:10 }}>SUGGESTED NEXT</div>
+                  {(()=>{
+                    const unplayed = domainConfig.filter(d=>!bs.domains[d.key]||bs.domains[d.key]===0);
+                    const weak = domainConfig.filter(d=>bs.domains[d.key]>0&&bs.domains[d.key]<60);
+                    const suggestions = [...unplayed.slice(0,2),...weak.slice(0,2)].slice(0,3);
+                    if (suggestions.length===0) return <div style={{ fontSize:12,color:"#00ff88",textAlign:"center" }}>All modules played! Keep your scores up. 🏆</div>;
+                    return suggestions.map(d=>(
+                      <div key={d.key} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${borderColor}` }}>
+                        <span style={{ fontSize:20 }}>{d.icon}</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:11,color:"#fff" }}>{d.label}</div>
+                          <div style={{ fontSize:9,color:mutedColor }}>{bs.domains[d.key]>0?`Currently ${bs.domains[d.key]}% — needs improvement`:"Not yet played"}</div>
+                        </div>
+                        <button onClick={()=>{
+                          setShowBrainScore(false);
+                          if(d.key==="math"){setAppMode("math");setScreen("intro");}
+                          else if(d.key==="vocab"){setAppMode("vocab");setVocabScreen("intro");}
+                          else if(d.key==="memory"){setAppMode("memory");setMemPhase("intro");}
+                          else if(d.key==="reflex"){setAppMode("reflex");setReflexPhase("intro");}
+                          else if(d.key==="pattern"){setAppMode("pattern");setPatPhase("intro");}
+                          else if(d.key==="spatial"){setAppMode("spatial");setSpatPhase("intro");}
+                        }} style={{ background:`${d.col}18`,border:`1px solid ${d.col}`,color:d.col,padding:"8px 12px",fontSize:10,cursor:"pointer",borderRadius:6,fontFamily:"inherit",letterSpacing:1 }}>PLAY →</button>
+                      </div>
+                    ));
+                  })()}
+                </div>
+
+                <button onClick={()=>setShowBrainScore(false)}
+                  style={{ width:"100%",background:"transparent",border:`1px solid ${borderColor}`,color:mutedColor,padding:"16px",fontSize:13,letterSpacing:3,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:52 }}>
+                  CLOSE
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
       </div>
     </div>
   );
@@ -2764,6 +3555,1201 @@ export default function MathGame() {
     );
   }
 
+
+
+
+
+
+  // ── DUAL N-BACK MODULE ──
+  if (appMode==="dualnback") {
+    const dcol      = "#8b5cf6";
+    const dcolLight = "#8b5cf618";
+    const validResults = dnResults.filter(r=>r!==null);
+    const posAcc  = validResults.length>0 ? Math.round(validResults.filter(r=>r.posCorrect).length/validResults.length*100) : 0;
+    const letAcc  = validResults.length>0 ? Math.round(validResults.filter(r=>r.letCorrect).length/validResults.length*100) : 0;
+    const overallAcc = validResults.length>0 ? Math.round((validResults.filter(r=>r.posCorrect).length+validResults.filter(r=>r.letCorrect).length)/(validResults.length*2)*100) : 0;
+    const curStim = dnSequence[dnIdx];
+    const prevStim = dnIdx>=dnN ? dnSequence[dnIdx-dnN] : null;
+
+    return (
+      <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+        <style>{`
+          @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes popIn{0%{transform:scale(0.7);opacity:0}100%{transform:scale(1);opacity:1}}
+          @keyframes glowPulse{0%,100%{box-shadow:0 0 12px #8b5cf644}50%{box-shadow:0 0 28px #8b5cf6aa}}
+          @keyframes flashGreen{0%,100%{background:transparent}30%{background:#00ff8822}}
+          @keyframes flashRed{0%,100%{background:transparent}30%{background:#ff446622}}
+        `}</style>
+
+        {/* Header */}
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <button onClick={()=>{ clearTimeout(dnTimer); setAppMode("home"); }}
+              style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", minHeight:44 }}>← HOME</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:4 }}>MODULE</div>
+              <div style={{ fontSize:14, color:dcol, letterSpacing:3 }}>DUAL N-BACK</div>
+            </div>
+            <div style={{ minWidth:70, textAlign:"right" }}>
+              {dnPhase==="playing"&&<div style={{ fontSize:10, color:mutedColor }}>{dnIdx+1}/{dnRounds}</div>}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+
+        {/* ── INTRO ── */}
+        {dnPhase==="intro"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:52, marginBottom:8 }}>🔮</div>
+              <h2 style={{ fontSize:30, color:dcol, letterSpacing:3, margin:"0 0 4px", textShadow:`0 0 20px ${dcol}44` }}>DUAL N-BACK</h2>
+              <div style={{ color:mutedColor, fontSize:11, letterSpacing:3 }}>WORKING MEMORY TRAINING</div>
+              {dnHighScore&&<div style={{ marginTop:8, fontSize:12, color:"#ffcc00" }}>🏆 High Score: {dnHighScore}</div>}
+            </div>
+
+            {/* Explanation */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>HOW TO PLAY</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {[
+                  { icon:"🔲", text:"A square lights up in a 3×3 grid AND a letter is spoken" },
+                  { icon:"🧠", text:`If the POSITION matches what was shown ${dnN} step${dnN>1?"s":""} ago — tap POSITION` },
+                  { icon:"🔤", text:`If the LETTER matches what was spoken ${dnN} step${dnN>1?"s":""} ago — tap LETTER` },
+                  { icon:"⚡", text:"Both can match at the same time — tap both!" },
+                  { icon:"🚫", text:"Don't tap if there's no match — false alarms cost points" },
+                ].map(({icon,text})=>(
+                  <div key={text} style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
+                    <span style={{ fontSize:18, flexShrink:0, marginTop:1 }}>{icon}</span>
+                    <span style={{ fontSize:12, color:mutedColor, lineHeight:1.5 }}>{text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Visual example */}
+            <div style={{ background:cardBg, border:`1px solid ${dcol}44`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:9, color:dcol, letterSpacing:3, marginBottom:10 }}>EXAMPLE — N=2</div>
+              <div style={{ display:"flex", gap:8, alignItems:"center", justifyContent:"center", flexWrap:"wrap" }}>
+                {[
+                  { step:1, pos:4, letter:"C", posM:false, letM:false },
+                  { step:2, pos:0, letter:"H", posM:false, letM:false },
+                  { step:3, pos:4, letter:"R", posM:true,  letM:false },
+                  { step:4, pos:7, letter:"H", posM:false, letM:true  },
+                ].map(s=>(
+                  <div key={s.step} style={{ textAlign:"center" }}>
+                    <div style={{ fontSize:9, color:mutedColor, marginBottom:4 }}>Step {s.step}</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(3,14px)", gap:2, margin:"0 auto 4px" }}>
+                      {Array.from({length:9}).map((_,i)=>(
+                        <div key={i} style={{ width:14, height:14, borderRadius:3, background:i===s.pos?`${dcol}cc`:"#1a3040", border:`1px solid ${i===s.pos?dcol:"#1a3040"}` }} />
+                      ))}
+                    </div>
+                    <div style={{ fontSize:13, color:dcol, fontWeight:"bold" }}>{s.letter}</div>
+                    <div style={{ fontSize:8, marginTop:3 }}>
+                      {s.posM&&<span style={{ color:"#00ff88" }}>POS✓ </span>}
+                      {s.letM&&<span style={{ color:"#ffcc00" }}>LET✓</span>}
+                      {!s.posM&&!s.letM&&<span style={{ color:mutedColor }}>—</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* N level selector */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:4 }}>N LEVEL</div>
+              <div style={{ fontSize:10, color:mutedColor, marginBottom:10 }}>Higher N = harder. Start with N=2 if new.</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
+                {[1,2,3,4].map(n=>{
+                  const sel=dnN===n;
+                  const labels=["EASY","MEDIUM","HARD","EXPERT"];
+                  const cols=["#00ff88","#ffcc00","#ff6b35","#ff4466"];
+                  return (
+                    <button key={n} onClick={()=>setDnN(n)}
+                      style={{ background:sel?`${cols[n-1]}18`:"transparent", border:`2px solid ${sel?cols[n-1]:borderColor}`, borderRadius:10, padding:"12px 6px", cursor:"pointer", fontFamily:"inherit", textAlign:"center", transition:"all 0.15s" }}>
+                      <div style={{ fontSize:18, color:sel?cols[n-1]:"#fff", fontWeight:"bold" }}>N={n}</div>
+                      <div style={{ fontSize:9, color:sel?cols[n-1]:mutedColor, marginTop:3 }}>{labels[n-1]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Stimuli count */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:16 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>STIMULI COUNT</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
+                {[10,15,20,25,30].map(n=>{
+                  const sel=dnRounds===n;
+                  return <button key={n} onClick={()=>setDnRounds(n)}
+                    style={{ background:sel?dcolLight:"transparent", border:`1px solid ${sel?dcol:borderColor}`, borderRadius:8, padding:"12px 4px", cursor:"pointer", fontFamily:"inherit", color:sel?dcol:mutedColor, fontSize:13, fontWeight:sel?"bold":"normal", minHeight:44 }}>{n}</button>;
+                })}
+              </div>
+            </div>
+
+            <button onClick={startDnGame}
+              style={{ width:"100%", background:"transparent", border:`2px solid ${dcol}`, color:dcol, padding:"18px", fontSize:16, letterSpacing:5, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 20px ${dcol}44`, transition:"all 0.2s", minHeight:58 }}
+              onMouseEnter={e=>{e.currentTarget.style.background=dcolLight;}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+              [ START ]
+            </button>
+          </div>
+        )}
+
+        {/* ── PLAYING ── */}
+        {dnPhase==="playing"&&(
+          <div style={{ animation:"fadeIn 0.3s ease" }}>
+            {/* HUD */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>SCORE</div>
+                <div style={{ fontSize:20, color:"#fff" }}>{String(dnScore).padStart(5,"0")}</div>
+              </div>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:10, color:dcol, letterSpacing:3, fontWeight:"bold" }}>N = {dnN}</div>
+                <div style={{ fontSize:9, color:mutedColor, marginTop:2 }}>stimulus {dnIdx+1} / {dnRounds}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>ACCURACY</div>
+                <div style={{ fontSize:18, color:overallAcc>=70?"#00ff88":overallAcc>=50?"#ffcc00":"#ff6b35" }}>{validResults.length>0?`${overallAcc}%`:"—"}</div>
+              </div>
+            </div>
+
+            {/* Progress */}
+            <div style={{ height:4, background:cardBg, borderRadius:2, marginBottom:18, overflow:"hidden" }}>
+              <div style={{ height:"100%", background:dcol, width:`${((dnIdx+1)/dnRounds)*100}%`, transition:"width 0.3s", borderRadius:2 }} />
+            </div>
+
+            {/* N-back reminder */}
+            <div style={{ textAlign:"center", marginBottom:10 }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:2 }}>
+                Does this match <span style={{ color:dcol }}>N={dnN} step{dnN>1?"s":""} ago</span>?
+              </div>
+            </div>
+
+            {/* 3x3 Grid */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"clamp(6px,2vw,10px)", width:"min(280px,80vw)", margin:"0 auto 16px", aspectRatio:"1" }}>
+              {Array.from({length:9}).map((_,i)=>{
+                const isActive = dnShowStimulus && curStim && curStim.pos===i;
+                const wasPrev  = prevStim && prevStim.pos===i;
+                return (
+                  <div key={i} style={{
+                    aspectRatio:"1",
+                    borderRadius:"clamp(8px,2.5vw,14px)",
+                    background: isActive ? `${dcol}dd` : wasPrev ? `${dcol}18` : cardBg,
+                    border: `2px solid ${isActive ? dcol : wasPrev ? `${dcol}44` : borderColor}`,
+                    boxShadow: isActive ? `0 0 20px ${dcol}88, 0 0 40px ${dcol}44` : "none",
+                    transition:"all 0.15s",
+                    animation: isActive ? "glowPulse 0.5s ease" : "none",
+                  }} />
+                );
+              })}
+            </div>
+
+            {/* Letter display */}
+            <div style={{ textAlign:"center", marginBottom:20, height:72, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              {dnShowStimulus && curStim ? (
+                <div style={{ fontSize:"clamp(52px,16vw,72px)", color:dcol, fontWeight:"bold", animation:"popIn 0.2s ease", textShadow:`0 0 24px ${dcol}88`, lineHeight:1 }}>
+                  {curStim.letter}
+                </div>
+              ) : (
+                <div style={{ fontSize:32, color:`${dcol}33`, fontWeight:"bold" }}>·</div>
+              )}
+            </div>
+
+            {/* Previous N-back hint */}
+            {prevStim&&(
+              <div style={{ textAlign:"center", marginBottom:14, fontSize:11, color:mutedColor }}>
+                {dnN} step{dnN>1?"s":""} ago: position {prevStim.pos+1} · letter <span style={{ color:dcol }}>{prevStim.letter}</span>
+              </div>
+            )}
+
+            {/* Response buttons */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              {/* Position button */}
+              <button onClick={()=>handleDnResponse("pos")}
+                disabled={!dnShowStimulus||dnPosAnswered||dnIdx<dnN}
+                style={{
+                  background: dnPosAnswered ? "#00ff8822" : dnIdx<dnN ? "transparent" : cardBg,
+                  border: `2px solid ${dnPosAnswered?"#00ff88":dnIdx<dnN?borderColor:"#00ff8866"}`,
+                  color: dnPosAnswered ? "#00ff88" : dnIdx<dnN ? mutedColor : "#00ff88",
+                  padding:"clamp(16px,4vw,22px) 10px",
+                  fontSize:"clamp(12px,3.5vw,15px)",
+                  letterSpacing:2,
+                  cursor: dnShowStimulus&&!dnPosAnswered&&dnIdx>=dnN ? "pointer" : "default",
+                  borderRadius:12,
+                  fontFamily:"inherit",
+                  transition:"all 0.15s",
+                  minHeight:64,
+                  touchAction:"manipulation",
+                  opacity: dnIdx<dnN ? 0.4 : 1,
+                }}>
+                {dnPosAnswered?"✓ ":""}POSITION
+                <div style={{ fontSize:9, marginTop:4, opacity:0.7 }}>same grid spot?</div>
+              </button>
+
+              {/* Letter button */}
+              <button onClick={()=>handleDnResponse("let")}
+                disabled={!dnShowStimulus||dnLetAnswered||dnIdx<dnN}
+                style={{
+                  background: dnLetAnswered ? "#ffcc0022" : dnIdx<dnN ? "transparent" : cardBg,
+                  border: `2px solid ${dnLetAnswered?"#ffcc00":dnIdx<dnN?borderColor:"#ffcc0066"}`,
+                  color: dnLetAnswered ? "#ffcc00" : dnIdx<dnN ? mutedColor : "#ffcc00",
+                  padding:"clamp(16px,4vw,22px) 10px",
+                  fontSize:"clamp(12px,3.5vw,15px)",
+                  letterSpacing:2,
+                  cursor: dnShowStimulus&&!dnLetAnswered&&dnIdx>=dnN ? "pointer" : "default",
+                  borderRadius:12,
+                  fontFamily:"inherit",
+                  transition:"all 0.15s",
+                  minHeight:64,
+                  touchAction:"manipulation",
+                  opacity: dnIdx<dnN ? 0.4 : 1,
+                }}>
+                {dnLetAnswered?"✓ ":""}LETTER
+                <div style={{ fontSize:9, marginTop:4, opacity:0.7 }}>same letter?</div>
+              </button>
+            </div>
+
+            {/* Live feedback flash */}
+            {dnFeedback&&dnIdx>dnN&&(
+              <div style={{ display:"flex", gap:8, justifyContent:"center", marginTop:12 }}>
+                <div style={{ fontSize:10, padding:"4px 10px", borderRadius:12,
+                  background: dnFeedback.pos==="correct"?"#00ff8822":dnFeedback.pos==="miss"?"#ff446622":"transparent",
+                  color: dnFeedback.pos==="correct"?"#00ff88":dnFeedback.pos==="miss"?"#ff4466":mutedColor,
+                  border:`1px solid ${dnFeedback.pos==="correct"?"#00ff8844":dnFeedback.pos==="miss"?"#ff446644":borderColor}` }}>
+                  POS {dnFeedback.pos==="correct"?"✓":dnFeedback.pos==="miss"?"MISS":"—"}
+                </div>
+                <div style={{ fontSize:10, padding:"4px 10px", borderRadius:12,
+                  background: dnFeedback.let==="correct"?"#ffcc0022":dnFeedback.let==="miss"?"#ff446622":"transparent",
+                  color: dnFeedback.let==="correct"?"#ffcc00":dnFeedback.let==="miss"?"#ff4466":mutedColor,
+                  border:`1px solid ${dnFeedback.let==="correct"?"#ffcc0044":dnFeedback.let==="miss"?"#ff446644":borderColor}` }}>
+                  LET {dnFeedback.let==="correct"?"✓":dnFeedback.let==="miss"?"MISS":"—"}
+                </div>
+              </div>
+            )}
+
+            {/* N-back count reminder */}
+            <div style={{ marginTop:16, background:cardBg, border:`1px solid ${borderColor}`, borderRadius:8, padding:"10px 14px", display:"flex", justifyContent:"space-between", fontSize:10, color:mutedColor }}>
+              <span>Hits: <span style={{ color:"#00ff88" }}>{validResults.filter(r=>r.posHit||r.letHit).length}</span></span>
+              <span>Misses: <span style={{ color:"#ff4466" }}>{validResults.filter(r=>r.posMiss||r.letMiss).length}</span></span>
+              <span>False alarms: <span style={{ color:"#ff6b35" }}>{validResults.filter(r=>r.posFA||r.letFA).length}</span></span>
+            </div>
+          </div>
+        )}
+
+        {/* ── SUMMARY ── */}
+        {dnPhase==="summary"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:10, color:dcol, letterSpacing:6, marginBottom:8 }}>SESSION COMPLETE</div>
+              <div style={{ fontSize:44, marginBottom:4 }}>{overallAcc>=85?"🏆":overallAcc>=70?"⭐":"🔮"}</div>
+              <h2 style={{ fontSize:26, color:"#fff", margin:"0 0 4px", letterSpacing:2 }}>N-BACK DONE</h2>
+              <div style={{ fontSize:12, color:dcol, letterSpacing:2 }}>N = {dnN} · {dnRounds} stimuli</div>
+            </div>
+
+            {/* Main stats */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+              {[
+                { label:"OVERALL ACC",   val:`${overallAcc}%`,  col:overallAcc>=70?"#00ff88":"#ff6b35" },
+                { label:"SCORE",          val:dnScore,            col:dcol },
+                { label:"POSITION ACC",  val:`${posAcc}%`,      col:"#00ff88" },
+                { label:"LETTER ACC",    val:`${letAcc}%`,      col:"#ffcc00" },
+              ].map(({label,val,col})=>(
+                <div key={label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 12px", textAlign:"center" }}>
+                  <div style={{ fontSize:22, color:col, fontWeight:"bold" }}>{val}</div>
+                  <div style={{ fontSize:9, color:mutedColor, letterSpacing:2, marginTop:4 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Hit / Miss / FA breakdown */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>RESPONSE BREAKDOWN</div>
+              {[
+                { label:"Correct (hits + correct rejects)", val: validResults.filter(r=>r.posCorrect).length + validResults.filter(r=>r.letCorrect).length, total:validResults.length*2, col:"#00ff88" },
+                { label:"Misses (matched but didn't tap)",  val: validResults.filter(r=>r.posMiss).length + validResults.filter(r=>r.letMiss).length, total:null, col:"#ff4466" },
+                { label:"False alarms (tapped no match)",   val: validResults.filter(r=>r.posFA).length + validResults.filter(r=>r.letFA).length, total:null, col:"#ff6b35" },
+              ].map(({label,val,total,col})=>(
+                <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${borderColor}` }}>
+                  <span style={{ fontSize:10, color:mutedColor }}>{label}</span>
+                  <span style={{ fontSize:13, color:col, fontWeight:"bold" }}>{total?`${val}/${total}`:val}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Performance tier */}
+            <div style={{ background:cardBg, border:`1px solid ${dcol}44`, borderRadius:10, padding:"14px 18px", marginBottom:14, textAlign:"center" }}>
+              <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:8 }}>PERFORMANCE</div>
+              <div style={{ fontSize:15, color:overallAcc>=85?"#ffcc00":overallAcc>=70?"#00ff88":overallAcc>=55?"#00cfff":"#ff6b35", fontWeight:"bold", letterSpacing:2 }}>
+                {overallAcc>=85?`🏆 EXCELLENT — Consider trying N=${Math.min(4,dnN+1)}`:
+                 overallAcc>=70?`⭐ GOOD — Keep training at N=${dnN}`:
+                 overallAcc>=55?`✅ IMPROVING — Stay at N=${dnN}`:
+                 `📈 CHALLENGING — Try N=${Math.max(1,dnN-1)} to build up`}
+              </div>
+              {overallAcc>=85&&dnN<4&&(
+                <div style={{ fontSize:10, color:mutedColor, marginTop:6 }}>Research suggests 85%+ accuracy means you're ready for the next N level.</div>
+              )}
+            </div>
+
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setDnPhase("intro")}
+                style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"16px", fontSize:13, letterSpacing:2, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:52 }}>SETTINGS</button>
+              <button onClick={()=>{ setDnResults([]); setDnIdx(0); startDnGame(); }}
+                style={{ flex:2, background:"transparent", border:`2px solid ${dcol}`, color:dcol, padding:"16px", fontSize:13, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 16px ${dcol}44`, minHeight:52 }}>PLAY AGAIN</button>
+            </div>
+          </div>
+        )}
+
+        </div>
+      </div>
+    );
+  }
+
+  // ── SPATIAL ROTATION MODULE ──
+  if (appMode==="spatial") {
+    const scol      = "#06b6d4";
+    const scolLight = "#06b6d418";
+    const accuracy  = spatResults.length>0 ? Math.round((spatCorrect/spatResults.length)*100) : 0;
+
+    return (
+      <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+        <style>{`
+          @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes popIn{0%{transform:scale(0.7);opacity:0}100%{transform:scale(1);opacity:1}}
+          @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+        `}</style>
+
+        {/* Header */}
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <button onClick={()=>setAppMode("home")}
+              style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", minHeight:44 }}>← HOME</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:4 }}>MODULE</div>
+              <div style={{ fontSize:14, color:scol, letterSpacing:3 }}>SPATIAL</div>
+            </div>
+            <div style={{ minWidth:60, textAlign:"right" }}>
+              {spatPhase==="question"&&<div style={{ fontSize:11, color:mutedColor }}>{spatRoundIdx+1}/{spatRounds}</div>}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+
+        {/* ── INTRO ── */}
+        {spatPhase==="intro"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:24 }}>
+              <div style={{ fontSize:56, marginBottom:8 }}>🌀</div>
+              <h2 style={{ fontSize:32, color:scol, letterSpacing:3, margin:"0 0 4px", textShadow:`0 0 20px ${scol}44` }}>SPATIAL</h2>
+              <div style={{ color:mutedColor, fontSize:12, letterSpacing:3 }}>ROTATION TRAINING</div>
+            </div>
+
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>HOW TO PLAY</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {[
+                  { icon:"👁️",  text:"A shape is shown on the left" },
+                  { icon:"🔄",  text:"Four rotated versions are shown as options" },
+                  { icon:"☝️",  text:"Tap the one that matches the ORIGINAL shape — just rotated" },
+                  { icon:"❌",  text:"Mirrored (flipped) shapes are wrong — rotation only" },
+                ].map(({icon,text})=>(
+                  <div key={text} style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <span style={{ fontSize:20, flexShrink:0 }}>{icon}</span>
+                    <span style={{ fontSize:12, color:mutedColor }}>{text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Difficulty */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>DIFFICULTY</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {[
+                  { key:"easy",   label:"EASY",   desc:"Simple 4-cell shapes · obvious rotations",     col:"#00ff88" },
+                  { key:"medium", label:"MEDIUM", desc:"5-cell shapes · closer rotations",              col:"#ffcc00" },
+                  { key:"hard",   label:"HARD",   desc:"6-cell shapes · near-identical distractors",    col:"#ff4466" },
+                ].map(d=>{
+                  const sel = spatDiff===d.key;
+                  return (
+                    <button key={d.key} onClick={()=>setSpatDiff(d.key)}
+                      style={{ background:sel?`${d.col}18`:"transparent", border:`2px solid ${sel?d.col:borderColor}`, borderRadius:10, padding:"12px 16px", cursor:"pointer", fontFamily:"inherit", textAlign:"left", display:"flex", alignItems:"center", gap:14, transition:"all 0.15s" }}>
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:d.col, flexShrink:0 }} />
+                      <div>
+                        <div style={{ fontSize:12, color:sel?d.col:"#fff", letterSpacing:2 }}>{d.label}</div>
+                        <div style={{ fontSize:10, color:mutedColor, marginTop:2 }}>{d.desc}</div>
+                      </div>
+                      {sel&&<div style={{ marginLeft:"auto", color:d.col, fontSize:14 }}>✓</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Rounds */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:16 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>QUESTIONS</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
+                {[5,10,15,20,25].map(n=>{
+                  const sel=spatRounds===n;
+                  return <button key={n} onClick={()=>setSpatRounds(n)}
+                    style={{ background:sel?scolLight:"transparent", border:`1px solid ${sel?scol:borderColor}`, borderRadius:8, padding:"12px 4px", cursor:"pointer", fontFamily:"inherit", color:sel?scol:mutedColor, fontSize:14, fontWeight:sel?"bold":"normal", minHeight:44 }}>{n}</button>;
+                })}
+              </div>
+            </div>
+
+            <button onClick={startSpatGame}
+              style={{ width:"100%", background:"transparent", border:`2px solid ${scol}`, color:scol, padding:"18px", fontSize:16, letterSpacing:5, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 20px ${scol}44`, transition:"all 0.2s", minHeight:58 }}
+              onMouseEnter={e=>{e.currentTarget.style.background=scolLight;}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+              [ START ]
+            </button>
+          </div>
+        )}
+
+        {/* ── QUESTION ── */}
+        {spatPhase==="question"&&spatQ&&(
+          <div style={{ animation:"fadeIn 0.3s ease" }}>
+            {/* HUD */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <div>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>SCORE</div>
+                <div style={{ fontSize:20, color:"#fff" }}>{String(spatScore).padStart(5,"0")}</div>
+              </div>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>Q {spatRoundIdx+1} / {spatRounds}</div>
+                <div style={{ fontSize:10, color:scol, letterSpacing:2, marginTop:2 }}>WHICH MATCHES?</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>STREAK</div>
+                <div style={{ fontSize:18, color:spatStreak>=3?"#ffcc00":"#fff" }}>{spatStreak>=3?"🔥":""}{spatStreak>0?`×${spatStreak}`:"-"}</div>
+              </div>
+            </div>
+
+            {/* Progress */}
+            <div style={{ height:4, background:cardBg, borderRadius:2, marginBottom:18, overflow:"hidden" }}>
+              <div style={{ height:"100%", background:scol, width:`${(spatRoundIdx/spatRounds)*100}%`, transition:"width 0.4s", borderRadius:2 }} />
+            </div>
+
+            {/* Original shape */}
+            <div style={{ background:cardBg, border:`2px solid ${scol}`, borderRadius:14, padding:"20px", marginBottom:16, display:"flex", flexDirection:"column", alignItems:"center" }}>
+              <div style={{ fontSize:9, color:scol, letterSpacing:4, marginBottom:12 }}>ORIGINAL SHAPE</div>
+              {renderShape(spatQ.base, scol, Math.min(120, Math.round(window?.innerWidth*0.28)||100))}
+            </div>
+
+            {/* 4 choices in 2×2 grid */}
+            <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, textAlign:"center", marginBottom:10 }}>TAP THE MATCHING ROTATION</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {spatQ.choices.map((c,i)=>{
+                const isCorrect = c.isCorrect;
+                let border2 = borderColor, bg2 = cardBg, label2col = mutedColor;
+                if (spatFeedback) {
+                  if (isCorrect)       { border2="#00ff88"; bg2="#00ff8818"; label2col="#00ff88"; }
+                  else if (i===spatSelected) { border2="#ff4466"; bg2="#ff446618"; label2col="#ff4466"; }
+                }
+                return (
+                  <button key={i} onClick={()=>handleSpatAnswer(i)} disabled={!!spatFeedback}
+                    style={{ background:bg2, border:`2px solid ${border2}`, borderRadius:12, padding:"16px 10px", cursor:spatFeedback?"default":"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:8, transition:"all 0.15s", minHeight:120, touchAction:"manipulation" }}>
+                    {renderShape(c.pts, spatFeedback?(isCorrect?"#00ff88":i===spatSelected?"#ff4466":mutedColor):scol, Math.min(80, Math.round((window?.innerWidth||390)*0.18)||70))}
+                    {spatFeedback&&isCorrect&&<div style={{ fontSize:10, color:"#00ff88", letterSpacing:2 }}>✓ CORRECT</div>}
+                    {spatFeedback&&i===spatSelected&&!isCorrect&&<div style={{ fontSize:10, color:"#ff4466", letterSpacing:2 }}>✗ WRONG</div>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Feedback */}
+            {spatFeedback&&(
+              <div style={{ animation:"slideUp 0.3s ease", marginTop:14 }}>
+                <div style={{ textAlign:"center", fontSize:14, letterSpacing:2, color:spatFeedback==="correct"?"#00ff88":"#ff4466", marginBottom:12 }}>
+                  {spatFeedback==="correct"
+                    ? `✓ CORRECT${spatStreak>1?` · ${spatStreak}× STREAK`:""}`
+                    : "✗ WRONG — see the highlighted answer"}
+                </div>
+                <button onClick={advanceSpatRound}
+                  style={{ width:"100%", background:spatFeedback==="correct"?scolLight:"#ff446618", border:`2px solid ${spatFeedback==="correct"?scol:"#ff4466"}`, color:spatFeedback==="correct"?scol:"#ff4466", padding:"16px", fontSize:14, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:54 }}>
+                  {spatRoundIdx+1>=spatRounds?"SEE RESULTS →":"NEXT →"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SUMMARY ── */}
+        {spatPhase==="summary"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:10, color:scol, letterSpacing:6, marginBottom:8 }}>SESSION COMPLETE</div>
+              <div style={{ fontSize:44, marginBottom:4 }}>{accuracy>=90?"🏆":accuracy>=70?"⭐":"🌀"}</div>
+              <h2 style={{ fontSize:28, color:"#fff", margin:"0 0 4px", letterSpacing:2 }}>SPATIAL DONE</h2>
+              <div style={{ fontSize:12, color:mutedColor, letterSpacing:2 }}>
+                {accuracy>=90?"EXCEPTIONAL 3D THINKING!":accuracy>=70?"STRONG SPATIAL AWARENESS":"KEEP ROTATING — IT GETS EASIER"}
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+              {[
+                { label:"ACCURACY",  val:`${accuracy}%`,                      col:accuracy>=80?"#00ff88":"#ff6b35" },
+                { label:"SCORE",     val:spatScore,                             col:scol },
+                { label:"CORRECT",   val:`${spatCorrect}/${spatResults.length}`, col:"#00ff88" },
+                { label:"STREAK",    val:`×${spatStreak}`,                     col:"#ffcc00" },
+              ].map(({label,val,col})=>(
+                <div key={label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 12px", textAlign:"center" }}>
+                  <div style={{ fontSize:22, color:col, fontWeight:"bold" }}>{val}</div>
+                  <div style={{ fontSize:9, color:mutedColor, letterSpacing:2, marginTop:4 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Round dots */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:14 }}>
+              <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>ROUND BY ROUND</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                {spatResults.map((r,i)=>(
+                  <div key={i} style={{ width:20, height:20, borderRadius:"50%", background:r.correct?"#00ff88":"#ff4466", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10 }}>
+                    {r.correct?"✓":"✗"}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setSpatPhase("intro")}
+                style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"16px", fontSize:13, letterSpacing:2, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:52 }}>
+                SETTINGS
+              </button>
+              <button onClick={startSpatGame}
+                style={{ flex:2, background:"transparent", border:`2px solid ${scol}`, color:scol, padding:"16px", fontSize:13, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 16px ${scol}44`, minHeight:52 }}>
+                PLAY AGAIN
+              </button>
+            </div>
+          </div>
+        )}
+
+        </div>
+      </div>
+    );
+  }
+
+  // ── PATTERN MODULE ──
+  if (appMode==="pattern") {
+    const pcol     = "#ec4899";
+    const pcolLight = "#ec489918";
+    const accuracy = patRoundResults.length>0 ? Math.round((patCorrect/patRoundResults.length)*100) : 0;
+
+    return (
+      <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+        <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes popIn{0%{transform:scale(0.7);opacity:0}100%{transform:scale(1);opacity:1}} @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}`}</style>
+
+        {/* Header */}
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <button onClick={()=>setAppMode("home")}
+              style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", minHeight:44 }}>← HOME</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:4 }}>MODULE</div>
+              <div style={{ fontSize:14, color:pcol, letterSpacing:3 }}>PATTERN</div>
+            </div>
+            <div style={{ textAlign:"right", minWidth:60 }}>
+              {patPhase==="question"&&<div style={{ fontSize:11, color:mutedColor }}>{patRoundIdx+1}/{patRounds}</div>}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+
+        {/* ── INTRO ── */}
+        {patPhase==="intro"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:24 }}>
+              <div style={{ fontSize:56, marginBottom:8 }}>🎨</div>
+              <h2 style={{ fontSize:32, color:pcol, letterSpacing:3, margin:"0 0 4px", textShadow:`0 0 20px ${pcol}44` }}>PATTERN</h2>
+              <div style={{ color:mutedColor, fontSize:12, letterSpacing:3 }}>SEQUENCE RECOGNITION</div>
+            </div>
+
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>HOW TO PLAY</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {[
+                  { icon:"🔢", text:"A number sequence is shown with one term missing" },
+                  { icon:"🧩", text:"Find the pattern — arithmetic, geometric, prime, Fibonacci..." },
+                  { icon:"☝️", text:"Tap the correct next number from 4 choices" },
+                  { icon:"⭐", text:"Streak bonus XP for consecutive correct answers" },
+                ].map(({icon,text})=>(
+                  <div key={text} style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <span style={{ fontSize:20, flexShrink:0 }}>{icon}</span>
+                    <span style={{ fontSize:12, color:mutedColor }}>{text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Difficulty */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>DIFFICULTY</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {[
+                  { key:"easy",   label:"EASY",   desc:"Arithmetic & geometric · smaller numbers", col:"#00ff88" },
+                  { key:"medium", label:"MEDIUM", desc:"Squares, alternating & Fibonacci patterns", col:"#ffcc00" },
+                  { key:"hard",   label:"HARD",   desc:"Primes, 2nd order & complex sequences",    col:"#ff4466" },
+                ].map(d=>{
+                  const sel = patDiff===d.key;
+                  return (
+                    <button key={d.key} onClick={()=>setPatDiff(d.key)}
+                      style={{ background:sel?`${d.col}18`:"transparent", border:`2px solid ${sel?d.col:borderColor}`, borderRadius:10, padding:"12px 16px", cursor:"pointer", fontFamily:"inherit", textAlign:"left", display:"flex", alignItems:"center", gap:14, transition:"all 0.15s" }}>
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:d.col, flexShrink:0 }} />
+                      <div>
+                        <div style={{ fontSize:12, color:sel?d.col:"#fff", letterSpacing:2 }}>{d.label}</div>
+                        <div style={{ fontSize:10, color:mutedColor, marginTop:2 }}>{d.desc}</div>
+                      </div>
+                      {sel&&<div style={{ marginLeft:"auto", color:d.col, fontSize:14 }}>✓</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Rounds */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:16 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>QUESTIONS</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
+                {[5,10,15,20,25].map(n=>{
+                  const sel=patRounds===n;
+                  return <button key={n} onClick={()=>setPatRounds(n)}
+                    style={{ background:sel?pcolLight:"transparent", border:`1px solid ${sel?pcol:borderColor}`, borderRadius:8, padding:"12px 4px", cursor:"pointer", fontFamily:"inherit", color:sel?pcol:mutedColor, fontSize:14, fontWeight:sel?"bold":"normal", minHeight:44 }}>{n}</button>;
+                })}
+              </div>
+            </div>
+
+            <button onClick={startPatGame}
+              style={{ width:"100%", background:"transparent", border:`2px solid ${pcol}`, color:pcol, padding:"18px", fontSize:16, letterSpacing:5, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 20px ${pcol}44`, transition:"all 0.2s", minHeight:58 }}
+              onMouseEnter={e=>{e.currentTarget.style.background=pcolLight;}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+              [ START ]
+            </button>
+          </div>
+        )}
+
+        {/* ── QUESTION ── */}
+        {patPhase==="question"&&patQ&&(
+          <div style={{ animation:"fadeIn 0.3s ease" }}>
+            {/* HUD */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>SCORE</div>
+                <div style={{ fontSize:20, color:"#fff" }}>{String(patScore).padStart(5,"0")}</div>
+              </div>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>Q {patRoundIdx+1} / {patRounds}</div>
+                <div style={{ fontSize:10, color:pcol, letterSpacing:2, marginTop:2 }}>{patQ.label}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>STREAK</div>
+                <div style={{ fontSize:18, color:patStreak>=3?"#ffcc00":"#fff" }}>{patStreak>=3?"🔥":""}{patStreak>0?`×${patStreak}`:"-"}</div>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div style={{ height:4, background:cardBg, borderRadius:2, marginBottom:20, overflow:"hidden" }}>
+              <div style={{ height:"100%", background:pcol, width:`${(patRoundIdx/patRounds)*100}%`, transition:"width 0.4s", borderRadius:2 }} />
+            </div>
+
+            {/* Sequence display */}
+            <div style={{ background:cardBg, border:`1px solid ${pcol}44`, borderRadius:14, padding:"24px 16px", marginBottom:20, textAlign:"center" }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:3, marginBottom:16 }}>WHAT COMES NEXT?</div>
+              <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"center", gap:8, marginBottom:8 }}>
+                {patQ.seq.map((n,i)=>(
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ background:`${pcol}18`, border:`1px solid ${pcol}44`, borderRadius:8, padding:"10px 14px", fontSize:"clamp(16px,4.5vw,22px)", color:pcol, fontWeight:"bold", minWidth:44, textAlign:"center" }}>
+                      {n}
+                    </div>
+                    <div style={{ color:mutedColor, fontSize:14 }}>→</div>
+                  </div>
+                ))}
+                {/* The missing term */}
+                <div style={{ background:"#ffffff18", border:`2px dashed ${pcol}`, borderRadius:8, padding:"10px 14px", fontSize:"clamp(16px,4.5vw,22px)", color:"#fff", fontWeight:"bold", minWidth:44, textAlign:"center", animation:"pulse 1s ease infinite" }}>
+                  ?
+                </div>
+              </div>
+            </div>
+
+            {/* Choices */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {patQ.choices.map((c,i)=>{
+                const isCorrect = c===patQ.answer;
+                let bg=cardBg, border2=borderColor, col="#fff";
+                if (patFeedback) {
+                  if (isCorrect) { bg="#00ff8818"; border2="#00ff88"; col="#00ff88"; }
+                  else if (i===patSelected) { bg="#ff446618"; border2="#ff4466"; col="#ff4466"; }
+                }
+                return (
+                  <button key={i} onClick={()=>handlePatAnswer(i)} disabled={!!patFeedback}
+                    style={{ background:bg, border:`2px solid ${border2}`, color:col, padding:"18px 10px", fontSize:"clamp(18px,5vw,26px)", fontWeight:"bold", borderRadius:12, cursor:patFeedback?"default":"pointer", fontFamily:"inherit", transition:"all 0.15s", minHeight:64, touchAction:"manipulation" }}>
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Feedback + explanation */}
+            {patFeedback&&(
+              <div style={{ animation:"slideUp 0.3s ease", marginTop:16 }}>
+                <div style={{ textAlign:"center", fontSize:14, letterSpacing:2, color:patFeedback==="correct"?"#00ff88":"#ff4466", marginBottom:8 }}>
+                  {patFeedback==="correct"
+                    ? `✓ CORRECT${patStreak>1?` · ${patStreak}× STREAK`:""}`
+                    : `✗ WRONG — Answer was ${patQ.answer}`}
+                </div>
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"12px 16px", marginBottom:12, textAlign:"center" }}>
+                  <div style={{ fontSize:9, color:pcol, letterSpacing:3, marginBottom:4 }}>PATTERN</div>
+                  <div style={{ fontSize:13, color:"#fff" }}>{patQ.explanation}</div>
+                </div>
+                <button onClick={advancePatRound}
+                  style={{ width:"100%", background:patFeedback==="correct"?pcolLight:"#ff446618", border:`2px solid ${patFeedback==="correct"?pcol:"#ff4466"}`, color:patFeedback==="correct"?pcol:"#ff4466", padding:"16px", fontSize:14, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:54 }}>
+                  {patRoundIdx+1>=patRounds?"RESULTS →":"NEXT →"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SUMMARY ── */}
+        {patPhase==="summary"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:10, color:pcol, letterSpacing:6, marginBottom:8 }}>SESSION COMPLETE</div>
+              <div style={{ fontSize:44, marginBottom:4 }}>{accuracy>=90?"🏆":accuracy>=70?"⭐":"🎨"}</div>
+              <h2 style={{ fontSize:28, color:"#fff", margin:"0 0 4px", letterSpacing:2 }}>PATTERN DONE</h2>
+              <div style={{ fontSize:12, color:mutedColor, letterSpacing:2 }}>
+                {accuracy>=90?"EXCELLENT PATTERN RECOGNITION!":accuracy>=70?"GOOD WORK — KEEP TRAINING":"MORE PRACTICE WILL HELP"}
+              </div>
+            </div>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+              {[
+                { label:"ACCURACY",  val:`${accuracy}%`,  col:accuracy>=80?"#00ff88":"#ff6b35" },
+                { label:"SCORE",     val:patScore,          col:pcol },
+                { label:"CORRECT",   val:`${patCorrect}/${patRoundResults.length}`, col:"#00ff88" },
+                { label:"BEST STREAK",val:`×${Math.max(0,...patRoundResults.reduce((acc,r)=>{
+                  const last=acc[acc.length-1];
+                  if(r.correct) acc[acc.length-1]=last+1; else acc.push(0);
+                  return acc;
+                },[0]))}`, col:"#ffcc00" },
+              ].map(({label,val,col})=>(
+                <div key={label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 12px", textAlign:"center" }}>
+                  <div style={{ fontSize:22, color:col, fontWeight:"bold" }}>{val}</div>
+                  <div style={{ fontSize:9, color:mutedColor, letterSpacing:2, marginTop:4 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Question type breakdown */}
+            {(()=>{
+              const byType = {};
+              patRoundResults.forEach(r=>{ if(!byType[r.label]) byType[r.label]={correct:0,total:0}; byType[r.label].total++; if(r.correct) byType[r.label].correct++; });
+              return Object.keys(byType).length>0?(
+                <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 16px", marginBottom:14 }}>
+                  <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>BY PATTERN TYPE</div>
+                  {Object.entries(byType).map(([type,{correct,total}])=>{
+                    const pct=Math.round((correct/total)*100);
+                    return (
+                      <div key={type} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                        <div style={{ fontSize:9, color:mutedColor, minWidth:90, letterSpacing:0 }}>{type}</div>
+                        <div style={{ flex:1, height:6, background:"#1a3040", borderRadius:3, overflow:"hidden" }}>
+                          <div style={{ height:"100%", width:`${pct}%`, background:pct>=80?"#00ff88":pct>=50?"#ffcc00":"#ff4466", borderRadius:3, transition:"width 0.5s" }} />
+                        </div>
+                        <div style={{ fontSize:9, color:mutedColor, minWidth:40, textAlign:"right" }}>{correct}/{total}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ):null;
+            })()}
+
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setPatPhase("intro")}
+                style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"16px", fontSize:13, letterSpacing:2, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:52 }}>
+                SETTINGS
+              </button>
+              <button onClick={startPatGame}
+                style={{ flex:2, background:"transparent", border:`2px solid ${pcol}`, color:pcol, padding:"16px", fontSize:13, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 16px ${pcol}44`, minHeight:52 }}>
+                PLAY AGAIN
+              </button>
+            </div>
+          </div>
+        )}
+
+        </div>
+      </div>
+    );
+  }
+
+  // ── MEMORY MODULE ──
+  if (appMode==="memory") {
+    const mcol = "#f59e0b";
+    const mcolLight = "#f59e0b18";
+    const { count, gridSize } = memGetConfig();
+    const totalCells = gridSize * gridSize;
+    const perfects = memRoundResults.filter(r=>r.perfect).length;
+    const totalCorrect = memRoundResults.reduce((s,r)=>s+r.correct,0);
+    const totalPossible = memRoundResults.reduce((s,r)=>s+r.total,0);
+    const accuracy = totalPossible>0 ? Math.round((totalCorrect/totalPossible)*100) : 0;
+
+    return (
+      <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+        <style>{`
+          @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes popIn{0%{transform:scale(0.6);opacity:0}100%{transform:scale(1);opacity:1}}
+          @keyframes flashWrong{0%,100%{background:inherit}50%{background:#ff446644}}
+          @keyframes shimmer{0%{opacity:1}100%{opacity:0.3}}
+          .mem-cell-correct{animation:popIn 0.2s ease;}
+        `}</style>
+
+        {/* Header */}
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingTop:"max(env(safe-area-inset-top),16px)", paddingBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <button onClick={()=>{ clearTimeout(memTimer); setAppMode("home"); }}
+              style={{ background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"12px 18px", fontSize:13, cursor:"pointer", borderRadius:8, fontFamily:"inherit", minHeight:44 }}>← HOME</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:4 }}>MODULE</div>
+              <div style={{ fontSize:14, color:mcol, letterSpacing:3 }}>MEMORY</div>
+            </div>
+            {(memPhase==="show"||memPhase==="recall"||memPhase==="result")?(
+              <div style={{ display:"flex", gap:4 }}>
+                {Array.from({length:3}).map((_,i)=>(
+                  <span key={i} style={{ fontSize:16, opacity:i<memLives?1:0.2 }}>❤️</span>
+                ))}
+              </div>
+            ):<div style={{ width:80 }} />}
+          </div>
+        </div>
+
+        <div style={{ width:"100%", maxWidth:"min(480px,100%)", paddingBottom:"max(env(safe-area-inset-bottom),32px)" }}>
+
+        {/* ── INTRO ── */}
+        {memPhase==="intro"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:24 }}>
+              <div style={{ fontSize:56, marginBottom:8 }}>🧠</div>
+              <h2 style={{ fontSize:32, color:mcol, letterSpacing:3, margin:"0 0 4px", textShadow:`0 0 20px ${mcol}44` }}>MEMORY</h2>
+              <div style={{ color:mutedColor, fontSize:12, letterSpacing:3 }}>SEQUENCE TRAINING</div>
+            </div>
+
+            {/* How to play */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>HOW TO PLAY</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {[
+                  { icon:"👀", text:"Numbers appear briefly in a grid — memorise their positions" },
+                  { icon:"🙈", text:"Numbers disappear — grid goes blank" },
+                  { icon:"☝️", text:"Tap the squares in order: 1, 2, 3..." },
+                  { icon:"❤️", text:"3 lives per round — wrong tap costs a life" },
+                  { icon:"⭐", text:"Perfect round = zero mistakes = bonus XP" },
+                ].map(({icon,text})=>(
+                  <div key={text} style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <span style={{ fontSize:20, flexShrink:0 }}>{icon}</span>
+                    <span style={{ fontSize:12, color:mutedColor }}>{text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Difficulty */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>DIFFICULTY</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {[
+                  { key:"easy",   label:"EASY",   desc:"5 numbers · 3×3 grid · 2.5s display", col:"#00ff88" },
+                  { key:"medium", label:"MEDIUM", desc:"8 numbers · 4×4 grid · 1.8s display", col:"#ffcc00" },
+                  { key:"hard",   label:"HARD",   desc:"12 numbers · 5×5 grid · 1.2s display", col:"#ff4466" },
+                ].map(d=>{
+                  const sel = memDiff===d.key;
+                  return (
+                    <button key={d.key} onClick={()=>setMemDiff(d.key)}
+                      style={{ background:sel?`${d.col}18`:"transparent", border:`2px solid ${sel?d.col:borderColor}`, borderRadius:10, padding:"12px 16px", cursor:"pointer", fontFamily:"inherit", textAlign:"left", display:"flex", alignItems:"center", gap:14, transition:"all 0.15s" }}>
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:d.col, flexShrink:0 }} />
+                      <div>
+                        <div style={{ fontSize:12, color:sel?d.col:"#fff", letterSpacing:2 }}>{d.label}</div>
+                        <div style={{ fontSize:10, color:mutedColor, marginTop:2 }}>{d.desc}</div>
+                      </div>
+                      {sel&&<div style={{ marginLeft:"auto", color:d.col, fontSize:14 }}>✓</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Rounds */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:16 }}>
+              <div style={{ fontSize:11, color:"#fff", letterSpacing:3, marginBottom:10 }}>ROUNDS</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
+                {[3,5,8,10,15].map(n=>{
+                  const sel=memRounds===n;
+                  return <button key={n} onClick={()=>setMemRounds(n)} style={{ background:sel?mcolLight:"transparent", border:`1px solid ${sel?mcol:borderColor}`, borderRadius:8, padding:"12px 4px", cursor:"pointer", fontFamily:"inherit", color:sel?mcol:mutedColor, fontSize:14, fontWeight:sel?"bold":"normal", minHeight:44 }}>{n}</button>;
+                })}
+              </div>
+            </div>
+
+            <button onClick={startMemGame}
+              style={{ width:"100%", background:"transparent", border:`2px solid ${mcol}`, color:mcol, padding:"18px", fontSize:16, letterSpacing:5, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 20px ${mcol}44`, transition:"all 0.2s", minHeight:58 }}
+              onMouseEnter={e=>{e.currentTarget.style.background=mcolLight;}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+              [ START ]
+            </button>
+          </div>
+        )}
+
+        {/* ── COUNTDOWN ── */}
+        {memShowCountdown&&(
+          <div style={{ textAlign:"center", padding:"60px 20px", animation:"popIn 0.3s ease" }}>
+            <div style={{ fontSize:10, color:mutedColor, letterSpacing:4, marginBottom:16 }}>ROUND {memRoundIdx+1} / {memRounds}</div>
+            <div style={{ fontSize:"clamp(80px,22vw,120px)", color:mcol, fontWeight:"bold", lineHeight:1 }}>{memCountdown}</div>
+            <div style={{ fontSize:14, color:mutedColor, letterSpacing:3, marginTop:16 }}>GET READY</div>
+          </div>
+        )}
+
+        {/* ── SHOW + RECALL PHASE ── */}
+        {(memPhase==="show"||memPhase==="recall")&&!memShowCountdown&&(
+          <div style={{ animation:"fadeIn 0.3s ease" }}>
+            {/* HUD */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>ROUND</div>
+                <div style={{ fontSize:18, color:"#fff" }}>{memRoundIdx+1} / {memRounds}</div>
+              </div>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:10, color:memPhase==="show"?mcol:"#00ff88", letterSpacing:3, fontWeight:"bold" }}>
+                  {memPhase==="show"?"👀 MEMORISE":"☝️ TAP IN ORDER"}
+                </div>
+                {memPhase==="recall"&&<div style={{ fontSize:12, color:mcol, marginTop:2 }}>Next: {memNext}</div>}
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:9, color:mutedColor, letterSpacing:3 }}>PROGRESS</div>
+                <div style={{ fontSize:18, color:"#fff" }}>{memTapped.length}/{count}</div>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div style={{ height:4, background:cardBg, borderRadius:2, marginBottom:14, overflow:"hidden" }}>
+              <div style={{ height:"100%", background:mcol, width:`${(memTapped.length/count)*100}%`, transition:"width 0.3s", borderRadius:2 }} />
+            </div>
+
+            {/* Grid */}
+            <div style={{
+              display:"grid",
+              gridTemplateColumns:`repeat(${gridSize}, 1fr)`,
+              gap:"clamp(4px,1.5vw,8px)",
+              width:"100%",
+              maxWidth:"min(420px,100%)",
+              margin:"0 auto",
+              aspectRatio:"1",
+            }}>
+              {memGrid.map((num, idx) => {
+                const isTapped = memTapped.includes(idx);
+                const isVisible = memPhase==="show" && num!==null;
+                const isRecallEmpty = memPhase==="recall" && !isTapped;
+
+                let cellBg = cardBg;
+                let cellColor = "transparent";
+                let cellBorder = borderColor;
+                let displayNum = null;
+
+                if (isVisible) {
+                  // Show phase: number visible
+                  cellBg = `${mcol}22`;
+                  cellBorder = mcol;
+                  displayNum = num;
+                  cellColor = mcol;
+                } else if (isTapped) {
+                  // Correctly tapped
+                  cellBg = "#00ff8822";
+                  cellBorder = "#00ff88";
+                  displayNum = memGrid[idx];
+                  cellColor = "#00ff88";
+                } else if (memPhase==="recall") {
+                  // Blank recall cell
+                  cellBg = cardBg;
+                  cellBorder = `${borderColor}`;
+                }
+
+                return (
+                  <div key={idx}
+                    onClick={()=>handleMemTap(idx)}
+                    className={isTapped?"mem-cell-correct":""}
+                    style={{
+                      aspectRatio:"1",
+                      background:cellBg,
+                      border:`2px solid ${cellBorder}`,
+                      borderRadius:"clamp(6px,2vw,10px)",
+                      display:"flex",
+                      alignItems:"center",
+                      justifyContent:"center",
+                      cursor:memPhase==="recall"&&!isTapped&&num!==null?"pointer":"default",
+                      transition:"all 0.15s",
+                      fontSize:"clamp(16px,5vw,26px)",
+                      fontWeight:"bold",
+                      color:cellColor,
+                      userSelect:"none",
+                      WebkitUserSelect:"none",
+                      touchAction:"manipulation",
+                    }}>
+                    {displayNum}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Errors indicator */}
+            {memPhase==="recall"&&memErrors>0&&(
+              <div style={{ textAlign:"center", marginTop:12, fontSize:12, color:"#ff4466", letterSpacing:2 }}>
+                ✗ {memErrors} mistake{memErrors>1?"s":""} — {memLives} {memLives===1?"life":"lives"} left
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── RESULT (after each round) ── */}
+        {memPhase==="result"&&(
+          <div style={{ animation:"popIn 0.3s ease", textAlign:"center" }}>
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:10, color:mutedColor, letterSpacing:4, marginBottom:12 }}>
+                ROUND {memRoundIdx+1} / {memRounds}
+              </div>
+              {(()=>{
+                const last = memRoundResults[memRoundResults.length-1];
+                if (!last) return null;
+                const pct = Math.round((last.correct/last.total)*100);
+                return (
+                  <>
+                    <div style={{ fontSize:56, marginBottom:8 }}>
+                      {last.perfect?"⭐":last.errors<=2?"✅":"❌"}
+                    </div>
+                    <div style={{ fontSize:28, color:last.perfect?"#ffcc00":last.errors<=2?"#00ff88":"#ff4466", letterSpacing:2, fontWeight:"bold", marginBottom:4 }}>
+                      {last.perfect?"PERFECT!":last.errors<=2?"GOOD":last.errors<=4?"CLOSE":"MISS"}
+                    </div>
+                    <div style={{ fontSize:14, color:mutedColor, marginBottom:16 }}>
+                      {last.correct}/{last.total} correct · {last.errors} mistake{last.errors!==1?"s":""}
+                    </div>
+                    {/* Mini accuracy bar */}
+                    <div style={{ height:8, background:"#ff446622", borderRadius:4, overflow:"hidden", marginBottom:16 }}>
+                      <div style={{ height:"100%", width:`${pct}%`, background:last.perfect?"#ffcc00":last.errors<=2?"#00ff88":"#ff4466", borderRadius:4, transition:"width 0.5s" }} />
+                    </div>
+                    {/* Replay the grid answer so player can learn */}
+                    <div style={{ fontSize:11, color:mutedColor, letterSpacing:2, marginBottom:10 }}>CORRECT SEQUENCE WAS:</div>
+                    <div style={{
+                      display:"grid",
+                      gridTemplateColumns:`repeat(${gridSize}, 1fr)`,
+                      gap:"clamp(3px,1vw,6px)",
+                      width:"100%",
+                      maxWidth:"min(340px,100%)",
+                      margin:"0 auto 20px",
+                    }}>
+                      {memGrid.map((num, idx) => (
+                        <div key={idx} style={{
+                          aspectRatio:"1",
+                          background:num!==null?`${mcol}18`:cardBg,
+                          border:`1px solid ${num!==null?mcol:borderColor}`,
+                          borderRadius:6,
+                          display:"flex", alignItems:"center", justifyContent:"center",
+                          fontSize:"clamp(11px,3.5vw,18px)",
+                          fontWeight:"bold",
+                          color:num!==null?mcol:"transparent",
+                        }}>
+                          {num}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Round history dots */}
+            {memRoundResults.length>0&&(
+              <div style={{ display:"flex", gap:8, justifyContent:"center", marginBottom:20 }}>
+                {memRoundResults.map((r,i)=>(
+                  <div key={i} style={{ width:10, height:10, borderRadius:"50%", background:r.perfect?"#ffcc00":r.errors<=2?"#00ff88":"#ff4466" }} />
+                ))}
+                {Array.from({length:memRounds-memRoundResults.length}).map((_,i)=>(
+                  <div key={"e"+i} style={{ width:10, height:10, borderRadius:"50%", background:borderColor }} />
+                ))}
+              </div>
+            )}
+
+            <button onClick={advanceMemRound}
+              style={{ width:"100%", background:mcolLight, border:`2px solid ${mcol}`, color:mcol, padding:"16px", fontSize:14, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:54 }}>
+              {memRoundIdx+1>=memRounds?"SEE RESULTS →":"NEXT ROUND →"}
+            </button>
+          </div>
+        )}
+
+        {/* ── SUMMARY ── */}
+        {memPhase==="summary"&&(
+          <div style={{ animation:"fadeIn 0.5s ease" }}>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:10, color:mcol, letterSpacing:6, marginBottom:8 }}>SESSION COMPLETE</div>
+              <div style={{ fontSize:44, marginBottom:4 }}>{perfects===memRounds?"🏆":perfects>0?"⭐":"🧠"}</div>
+              <h2 style={{ fontSize:28, color:"#fff", margin:"0 0 4px", letterSpacing:2 }}>MEMORY DONE</h2>
+              <div style={{ fontSize:12, color:mutedColor, letterSpacing:2 }}>
+                {perfects===memRounds?"ALL PERFECT — OUTSTANDING!":perfects>0?`${perfects} PERFECT ROUND${perfects>1?"S":""}!`:"KEEP TRAINING"}
+              </div>
+            </div>
+
+            {/* Stats grid */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+              {[
+                { label:"ACCURACY",  val:`${accuracy}%`,  col:accuracy>=90?"#ffcc00":accuracy>=70?"#00ff88":"#ff6b35" },
+                { label:"PERFECT",   val:`${perfects}/${memRounds}`, col:"#ffcc00" },
+                { label:"CORRECT",   val:`${totalCorrect}/${totalPossible}`, col:"#00ff88" },
+                { label:"DIFFICULTY",val:memDiff.toUpperCase(), col:memDiff==="easy"?"#00ff88":memDiff==="medium"?"#ffcc00":"#ff4466" },
+              ].map(({label,val,col})=>(
+                <div key={label} style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 12px", textAlign:"center" }}>
+                  <div style={{ fontSize:22, color:col, fontWeight:"bold" }}>{val}</div>
+                  <div style={{ fontSize:9, color:mutedColor, letterSpacing:2, marginTop:4 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Round-by-round results */}
+            <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 16px", marginBottom:14 }}>
+              <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>ROUND BY ROUND</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {memRoundResults.map((r,i)=>{
+                  const pct=Math.round((r.correct/r.total)*100);
+                  return (
+                    <div key={i} style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <div style={{ fontSize:10, color:mutedColor, minWidth:54 }}>Round {i+1}</div>
+                      <div style={{ flex:1, height:8, background:"#1a3040", borderRadius:4, overflow:"hidden" }}>
+                        <div style={{ height:"100%", width:`${pct}%`, background:r.perfect?"#ffcc00":r.errors<=2?"#00ff88":"#ff4466", borderRadius:4, transition:"width 0.5s" }} />
+                      </div>
+                      <div style={{ fontSize:10, color:r.perfect?"#ffcc00":r.errors<=2?"#00ff88":"#ff4466", minWidth:36, textAlign:"right" }}>
+                        {r.perfect?"⭐":`${pct}%`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setMemPhase("intro")}
+                style={{ flex:1, background:"transparent", border:`1px solid ${borderColor}`, color:mutedColor, padding:"16px", fontSize:13, letterSpacing:2, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:52 }}>
+                SETTINGS
+              </button>
+              <button onClick={()=>{ setMemRoundResults([]); setMemRoundIdx(0); setMemLives(3); startMemGame(); }}
+                style={{ flex:2, background:"transparent", border:`2px solid ${mcol}`, color:mcol, padding:"16px", fontSize:13, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", boxShadow:`0 0 16px ${mcol}44`, minHeight:52 }}>
+                PLAY AGAIN
+              </button>
+            </div>
+          </div>
+        )}
+
+        </div>
+      </div>
+    );
+  }
 
   // ── REFLEX MODULE ──
   if (appMode==="reflex") {
