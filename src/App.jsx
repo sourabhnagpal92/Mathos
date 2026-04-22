@@ -1136,7 +1136,15 @@ function buildDefaultSave() {
     powerups: { fifty: 2, time: 2, skip: 2 },
     missedQuestions: [],
     streak: { lastDate: null, count: 0 },
-    xpPenaltyApplied: null, // date string of last penalty applied
+    xpPenaltyApplied: null,
+    // Cross-module tracking
+    dailyChallenge: { date: null, modules: [], completed: false, bonusAwarded: false },
+    weeklyChallenge: { weekStart: null, target: 0, progress: 0, completed: false },
+    modulesPlayedToday: {},    // { moduleKey: sessionsToday }
+    personalRecords: {},       // { moduleKey: bestScore }
+    totalSessionsAll: 0,
+    comboStreakDays: 0,        // days in a row playing 3+ modules
+    lastComboDate: null,
   };
 }
 
@@ -1184,6 +1192,76 @@ function persistAll() {
   writeSave(save);
 }
 
+// ── Cross-module helpers ──
+const TODAY = () => new Date().toDateString();
+
+function getModulesPlayedToday() {
+  if (!save.modulesPlayedToday) save.modulesPlayedToday = {};
+  const today = TODAY();
+  // Reset if new day
+  if (!save._mptDate || save._mptDate !== today) {
+    save.modulesPlayedToday = {};
+    save._mptDate = today;
+  }
+  return save.modulesPlayedToday;
+}
+
+function recordModulePlayed(moduleKey) {
+  const mpt = getModulesPlayedToday();
+  mpt[moduleKey] = (mpt[moduleKey] || 0) + 1;
+  save.modulesPlayedToday = mpt;
+  save._mptDate = TODAY();
+  save.totalSessionsAll = (save.totalSessionsAll || 0) + 1;
+  // Update combo streak
+  const today = TODAY();
+  const uniqueToday = Object.keys(mpt).length;
+  if (uniqueToday >= 3) {
+    if (save.lastComboDate !== today) {
+      save.lastComboDate = today;
+      save.comboStreakDays = (save.comboStreakDays || 0) + 1;
+    }
+  }
+  writeSave(save);
+}
+
+function updatePersonalRecord(moduleKey, score) {
+  if (!save.personalRecords) save.personalRecords = {};
+  if (!save.personalRecords[moduleKey] || score > save.personalRecords[moduleKey]) {
+    save.personalRecords[moduleKey] = score;
+    writeSave(save);
+    return true; // new record
+  }
+  return false;
+}
+
+function getDailyChallenge() {
+  if (!save.dailyChallenge) save.dailyChallenge = { date:null, modules:[], completed:false, bonusAwarded:false };
+  const today = TODAY();
+  if (save.dailyChallenge.date !== today) {
+    // Generate new daily challenge — pick 3 random modules
+    const allMods = ["math","vocab","sudoku","reflex","memory","pattern","spatial","dualnback"];
+    const shuffled = allMods.sort(()=>Math.random()-0.5);
+    save.dailyChallenge = { date:today, modules:shuffled.slice(0,3), completed:false, bonusAwarded:false };
+    writeSave(save);
+  }
+  return save.dailyChallenge;
+}
+
+function checkDailyChallengeComplete() {
+  const dc = getDailyChallenge();
+  if (dc.completed) return false;
+  const mpt = getModulesPlayedToday();
+  const done = dc.modules.every(m => mpt[m] && mpt[m]>0);
+  if (done && !dc.bonusAwarded) {
+    dc.completed = true;
+    dc.bonusAwarded = true;
+    save.dailyChallenge = dc;
+    writeSave(save);
+    return true; // just completed!
+  }
+  return false;
+}
+
 // ── Brain Score persistence ──
 const BS_KEY = "braintrain_brainscore";
 function loadBrainScoreHistory() {
@@ -1196,6 +1274,78 @@ function saveBrainScoreEntry(entry) {
     if (hist.length>30) hist.shift(); // keep last 30 days
     localStorage.setItem(BS_KEY, JSON.stringify(hist));
   } catch(e){}
+}
+
+// ── Cross-module tracking ──
+const DAILY_KEY   = "bt_daily_v1";
+const WEEKLY_KEY  = "bt_weekly_v1";
+
+function getTodayStr() { return new Date().toDateString(); }
+function getWeekStr()  {
+  const d = new Date();
+  const day = d.getDay();
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - (day===0?6:day-1));
+  return monday.toDateString();
+}
+
+function loadDailyProgress() {
+  try {
+    const raw = localStorage.getItem(DAILY_KEY);
+    const data = raw ? JSON.parse(raw) : {};
+    if (data.date !== getTodayStr()) {
+      // New day — reset
+      return { date: getTodayStr(), modules: {}, bonusClaimed: false };
+    }
+    return data;
+  } catch(e) { return { date: getTodayStr(), modules: {}, bonusClaimed: false }; }
+}
+
+function saveDailyProgress(data) {
+  try { localStorage.setItem(DAILY_KEY, JSON.stringify(data)); } catch(e) {}
+}
+
+function markModulePlayed(module) {
+  const dp = loadDailyProgress();
+  if (!dp.modules[module]) {
+    dp.modules[module] = { playedAt: Date.now(), count: 0 };
+  }
+  dp.modules[module].count++;
+  saveDailyProgress(dp);
+}
+
+function loadWeeklyChallenge() {
+  try {
+    const raw = localStorage.getItem(WEEKLY_KEY);
+    const data = raw ? JSON.parse(raw) : {};
+    if (data.week !== getWeekStr()) {
+      return { week: getWeekStr(), attempted: false, score: null, modules: null };
+    }
+    return data;
+  } catch(e) { return { week: getWeekStr(), attempted: false, score: null }; }
+}
+
+function saveWeeklyChallenge(data) {
+  try { localStorage.setItem(WEEKLY_KEY, JSON.stringify(data)); } catch(e) {}
+}
+
+// Weekly challenge: deterministic sequence of 3 modules based on week seed
+function getWeeklyModules() {
+  const week = getWeekStr();
+  let hash = 0;
+  for (let c of week) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
+  const all = ["math","vocab","memory","reflex","pattern","spatial","dualnback"];
+  const a = all[Math.abs(hash) % all.length];
+  const b = all[Math.abs(hash >> 4) % all.length] !== a ? all[Math.abs(hash >> 4) % all.length] : all[(Math.abs(hash >> 4)+1) % all.length];
+  const c2 = all[Math.abs(hash >> 8) % all.length] !== a && all[Math.abs(hash >> 8) % all.length] !== b ? all[Math.abs(hash >> 8) % all.length] : all[(Math.abs(hash >> 8)+2) % all.length];
+  return [a, b, c2];
+}
+
+// Daily challenge: always Math + Vocab + one rotating third
+function getDailyChallengeMods() {
+  const day = new Date().getDay(); // 0-6
+  const third = ["memory","reflex","pattern","spatial","dualnback","memory","reflex"][day];
+  return ["math","vocab",third];
 }
 
 function recordStat(topic, correct) {
@@ -1386,6 +1536,17 @@ export default function MathGame() {
 
   // ── Brain Score dashboard state ──
   const [showBrainScore, setShowBrainScore] = useState(false);
+
+  // ── Cross-module state ──
+  const [dailyChallengeDone, setDailyChallengeAdone] = useState(false);  // flashes when completed
+  const [newRecord, setNewRecord] = useState(null);    // { module, score } — shown briefly
+  const [comboUnlocked, setComboUnlocked] = useState(false);
+  const [showDailyPanel, setShowDailyPanel] = useState(false);
+  const [showWeekly, setShowWeekly]         = useState(false);
+  const [dailyProgress, setDailyProgress]   = useState(()=>loadDailyProgress());
+  const [weeklyData, setWeeklyData]         = useState(()=>loadWeeklyChallenge());
+  const [sessionModules, setSessionModules] = useState(new Set()); // modules played this session
+  const [comboBonus, setComboBonus]         = useState(null);      // flash message
 
   // ── Spatial Rotation module state ──
   const [spatPhase, setSpatPhase]       = useState("intro");
@@ -1704,7 +1865,9 @@ export default function MathGame() {
     setVocabScore(0); setVocabStreak(0); setVocabTotal(0); setVocabCorrect(0);
     setVocabSessionWords([]); setVocabQIdx(0); setVocabFeedback(null);
     setVocabSessionStart(Date.now()); setVocabXpEarned(0);
-    setVocabQ(null); // clear old question
+    setVocabQ(null);
+    markModulePlayed("vocab");
+    setSessionModules(prev => { const n=new Set(prev); n.add("vocab"); checkCombo(n); return n; });
     setVocabScreen("game");
   }
 
@@ -1780,9 +1943,9 @@ export default function MathGame() {
   }
 
   function startReflexGame() {
-    setReflexTimes([]);
-    setReflexRoundIdx(0);
-    setReflexResult(null);
+    setReflexTimes([]); setReflexRoundIdx(0); setReflexResult(null);
+    markModulePlayed("reflex");
+    setSessionModules(prev => { const n=new Set(prev); n.add("reflex"); checkCombo(n); return n; });
     startReflexRound();
   }
 
@@ -1885,7 +2048,7 @@ export default function MathGame() {
     const xpEarned = errors===0 ? (memDiff==="easy"?10:memDiff==="medium"?18:28) :
                      errors<=2  ? (memDiff==="easy"?5:memDiff==="medium"?10:16) : 2;
     setXp(x => { const nx=x+xpEarned; globalXP=nx; persistAll(); return nx; });
-    setMemRoundResults(prev => [...prev, { correct, total, errors, perfect: errors===0 }]);
+    setMemRoundResults(prev => { const nr=[...prev,{correct,total,errors,perfect:errors===0}]; if(nr.length===memRounds){const sc=nr.filter(r=>r.perfect).length*100+nr.reduce((s,r)=>s+r.correct,0)*10; if(updatePersonalRecord("memory",sc)){setNewRecord({module:"Memory",score:sc});setTimeout(()=>setNewRecord(null),3000);}} return nr; });
     setMemPhase("result");
   }
 
@@ -1901,11 +2064,9 @@ export default function MathGame() {
   }
 
   function startMemGame() {
-    setMemRoundIdx(0);
-    setMemRoundResults([]);
-    setMemTapped([]);
-    setMemErrors(0);
-    setMemLives(3);
+    setMemRoundIdx(0); setMemRoundResults([]); setMemTapped([]); setMemErrors(0); setMemLives(3);
+    markModulePlayed("memory");
+    setSessionModules(prev => { const n=new Set(prev); n.add("memory"); checkCombo(n); return n; });
     startMemRound(0);
   }
 
@@ -2040,9 +2201,13 @@ export default function MathGame() {
   function startPatGame() {
     setPatScore(0); setPatStreak(0); setPatCorrect(0);
     setPatRoundResults([]); setPatRoundIdx(0);
+    markModulePlayed("pattern");
+    setSessionModules(prev => { const n=new Set(prev); n.add("pattern"); checkCombo(n); return n; });
     setPatPhase("question");
     setPatQ(patMakeQuestion(patDiff));
     setPatSelected(null); setPatFeedback(null);
+    recordModulePlayed("pattern");
+    if(checkDailyChallengeComplete()){setDailyChallengeAdone(true);setTimeout(()=>setDailyChallengeAdone(false),4000);setXp(x=>{const nx=x+200;globalXP=nx;persistAll();return nx;});}
   }
 
   // ── Brain Score calculator ──
@@ -2166,7 +2331,7 @@ export default function MathGame() {
 
   function advanceSpatRound() {
     const next = spatRoundIdx+1;
-    if (next>=spatRounds) { setSpatPhase("summary"); return; }
+    if (next>=spatRounds) { if(updatePersonalRecord("spatial",spatScore)){setNewRecord({module:"Spatial",score:spatScore});setTimeout(()=>setNewRecord(null),3000);} setSpatPhase("summary"); return; }
     setSpatRoundIdx(next);
     setSpatQ(spatMakeQuestion(spatDiff));
     setSpatSelected(null);
@@ -2176,9 +2341,13 @@ export default function MathGame() {
   function startSpatGame() {
     setSpatScore(0); setSpatStreak(0); setSpatCorrect(0);
     setSpatResults([]); setSpatRoundIdx(0);
+    markModulePlayed("spatial");
+    setSessionModules(prev => { const n=new Set(prev); n.add("spatial"); checkCombo(n); return n; });
     setSpatQ(spatMakeQuestion(spatDiff));
     setSpatSelected(null); setSpatFeedback(null);
     setSpatPhase("question");
+    recordModulePlayed("spatial");
+    if(checkDailyChallengeComplete()){setDailyChallengeAdone(true);setTimeout(()=>setDailyChallengeAdone(false),4000);setXp(x=>{const nx=x+200;globalXP=nx;persistAll();return nx;});}
   }
 
   // Helper: render a shape as a mini SVG grid (5x5 cells)
@@ -2225,6 +2394,8 @@ export default function MathGame() {
   }
 
   function startDnGame() {
+    markModulePlayed("dualnback");
+    setSessionModules(prev => { const n=new Set(prev); n.add("dualnback"); checkCombo(n); return n; });
     const seq = dnBuildSequence(dnN, dnRounds);
     setDnSequence(seq);
     setDnIdx(0);
@@ -2234,12 +2405,14 @@ export default function MathGame() {
     setDnLetAnswered(false);
     setDnFeedback(null);
     setDnPhase("playing");
-    // start first stimulus after short delay
+    recordModulePlayed("dualnback");
+    if(checkDailyChallengeComplete()){setDailyChallengeAdone(true);setTimeout(()=>setDailyChallengeAdone(false),4000);setXp(x=>{const nx=x+200;globalXP=nx;persistAll();return nx;});}
     setTimeout(() => dnShowNext(seq, 0, dnN), 600);
   }
 
   function dnShowNext(seq, idx, n) {
     if (idx >= seq.length) {
+      if(updatePersonalRecord("dualnback",dnScore)){setNewRecord({module:"N-Back",score:dnScore});setTimeout(()=>setNewRecord(null),3000);}
       setDnPhase("summary");
       return;
     }
@@ -2289,12 +2462,56 @@ export default function MathGame() {
     return { posMatch, letMatch, posAnswered, letAnswered, posCorrect, letCorrect, posHit, letHit, posFA, letFA, posMiss, letMiss };
   }
 
+  function checkWeeklyCompletion(playedModules) {
+    const wc = loadWeeklyChallenge();
+    if (wc.attempted) return; // already locked
+    const weeklyMods = getWeeklyModules();
+    const allDone = weeklyMods.every(m => playedModules.has(m));
+    if (allDone) {
+      const score = globalXP;
+      const updated = { ...wc, attempted: true, score, completedAt: Date.now() };
+      saveWeeklyChallenge(updated);
+      setWeeklyData(updated);
+      // Weekly bonus
+      setXp(x=>{ const nx=x+100; globalXP=nx; persistAll(); return nx; });
+      setComboBonus({ label:"📅 WEEKLY CHALLENGE DONE!", bonus: 100 });
+      setTimeout(()=>setComboBonus(null), 4000);
+    }
+  }
+
+  function checkCombo(modules) {
+    // Combo bonuses: 3 modules = +30XP, 5 = +75XP, all 7 = +150XP
+    const thresholds = [[3,30,"🎯 TRIPLE MODULE!"],[5,75,"🔥 FIVE MODULE COMBO!"],[7,150,"🏆 ALL MODULES MASTER!"]];
+    for (const [count, bonus, label] of thresholds) {
+      if (modules.size === count) {
+        setXp(x=>{ const nx=x+bonus; globalXP=nx; persistAll(); return nx; });
+        setComboBonus({ label, bonus });
+        setTimeout(()=>setComboBonus(null), 3500);
+        // Check + update daily challenge
+        const dp = loadDailyProgress();
+        const challMods = getDailyChallengeMods();
+        const allDone = challMods.every(m=>dp.modules[m]);
+        if (allDone && !dp.bonusClaimed) {
+          dp.bonusClaimed = true;
+          saveDailyProgress(dp);
+          setDailyProgress({...dp});
+          // Extra daily bonus
+          setXp(x=>{ const nx=x+50; globalXP=nx; persistAll(); return nx; });
+        } else {
+          setDailyProgress(loadDailyProgress());
+        }
+      }
+    }
+  }
+
   function handleStart() {
     if (isReview && missedQuestions.length === 0) {
       setInputError("No wrong answers yet! Play other modes first to build your review list.");
       return;
     }
     setInputError("");
+    markModulePlayed("math");
+    setSessionModules(prev => { const n=new Set(prev); n.add("math"); checkCombo(n); return n; });
     setLives(3); setAdaptiveLevel(0); setConsCorrect(0); setConsWrong(0);
     setScore(0); setStreak(0); setMaxStreak(0); setTotalCorrect(0); setTotalAnswered(0);
     sessionHistory=[];
@@ -2511,7 +2728,7 @@ export default function MathGame() {
   }
 
   // ── Sudoku functions ──
-  function startSudoku() {
+  function startSudoku() { recordModulePlayed('sudoku'); if(checkDailyChallengeComplete()){setDailyChallengeAdone(true);setTimeout(()=>setDailyChallengeAdone(false),4000);setXp(x=>{const nx=x+200;globalXP=nx;persistAll();return nx;});}
     const { solved, puzzle } = generateSudoku(sudokuDiff);
     setSudokuSolved(solved); setSudokuPuzzle(puzzle);
     setSudokuGrid(puzzle.map(r=>[...r]));
@@ -2622,7 +2839,73 @@ export default function MathGame() {
   if (appMode==="home") return (
     <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ position:"fixed",inset:0,opacity:theme==="dark"?0.04:0.02, backgroundImage:"linear-gradient(#00ff88 1px,transparent 1px),linear-gradient(90deg,#00ff88 1px,transparent 1px)", backgroundSize:"40px 40px", pointerEvents:"none" }} />
-      <style>{`@keyframes glitch{0%,100%{transform:translate(0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,2px)}80%{transform:translate(1px,-2px)}} @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes pop{0%{transform:scale(0);opacity:1}100%{transform:scale(2.5) translateY(-50px);opacity:0}}`}</style>
+      <style>{`@keyframes popIn{0%{transform:scale(0.5);opacity:0}100%{transform:scale(1);opacity:1}} @keyframes glitch{0%,100%{transform:translate(0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,2px)}80%{transform:translate(1px,-2px)}} @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes pop{0%{transform:scale(0);opacity:1}100%{transform:scale(2.5) translateY(-50px);opacity:0}}`}</style>
+      {/* ── COMBO BONUS TOAST ── */}
+      {comboBonus&&(
+        <div style={{ position:"fixed",top:"max(env(safe-area-inset-top),20px)",left:"50%",transform:"translateX(-50%)",zIndex:300,animation:"fadeIn 0.3s ease",background:"linear-gradient(135deg,#1a3040,#0a1520)",border:"2px solid #ffcc00",borderRadius:14,padding:"14px 24px",textAlign:"center",boxShadow:"0 0 30px #ffcc0066",minWidth:220 }}>
+          <div style={{ fontSize:18,marginBottom:4 }}>{comboBonus.label}</div>
+          <div style={{ fontSize:22,color:"#ffcc00",fontWeight:"bold" }}>+{comboBonus.bonus} XP BONUS!</div>
+        </div>
+      )}
+
+      {/* ── WEEKLY CHALLENGE OVERLAY ── */}
+      {showWeekly&&(()=>{
+        const wc = weeklyData;
+        const mods = getWeeklyModules();
+        const modMeta = {
+  math:     { icon:"🧮", col:"#00ff88", label:"Math" },
+  vocab:    { icon:"📚", col:"#a78bfa", label:"Vocab" },
+  memory:   { icon:"🧠", col:"#f59e0b", label:"Memory" },
+  reflex:   { icon:"⚡", col:"#ff6b35", label:"Reflex" },
+  pattern:  { icon:"🎨", col:"#ec4899", label:"Pattern" },
+  spatial:  { icon:"🌀", col:"#06b6d4", label:"Spatial" },
+  dualnback:{ icon:"🔮", col:"#8b5cf6", label:"N-Back" },
+};
+        const dp = dailyProgress;
+        return (
+          <div style={{ position:"fixed",inset:0,background:"#050a0fee",zIndex:200,overflowY:"auto",display:"flex",alignItems:"center",justifyContent:"center",padding:"20px" }}>
+            <div style={{ width:"100%",maxWidth:"min(440px,100%)",animation:"fadeIn 0.4s ease" }}>
+              <div style={{ textAlign:"center",marginBottom:20 }}>
+                <div style={{ fontSize:10,color:"#ffcc00",letterSpacing:4,marginBottom:6 }}>THIS WEEK</div>
+                <div style={{ fontSize:36,marginBottom:4 }}>📅</div>
+                <h2 style={{ fontSize:24,color:"#fff",margin:"0 0 4px",letterSpacing:2 }}>WEEKLY CHALLENGE</h2>
+                <div style={{ fontSize:11,color:mutedColor }}>Week of {getWeekStr()}</div>
+              </div>
+              <div style={{ background:cardBg,border:"1px solid #ffcc0044",borderRadius:12,padding:"20px",marginBottom:16 }}>
+                <div style={{ fontSize:9,color:"#ffcc00",letterSpacing:3,marginBottom:14 }}>THIS WEEK'S MODULES</div>
+                {mods.map((m,i)=>{
+                  const meta = modMeta[m]||{icon:"🎮",col:"#fff",label:m};
+                  const done = dp.modules && dp.modules[m];
+                  return (
+                    <div key={m} style={{ display:"flex",alignItems:"center",gap:14,padding:"12px 0",borderBottom:i<mods.length-1?`1px solid ${borderColor}`:"none" }}>
+                      <div style={{ fontSize:26 }}>{meta.icon}</div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:13,color:"#fff",letterSpacing:2 }}>{meta.label.toUpperCase()}</div>
+                        <div style={{ fontSize:10,color:mutedColor,marginTop:2 }}>Play this module to contribute</div>
+                      </div>
+                      <div style={{ fontSize:20 }}>{done?"✅":"⬜"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              {wc.attempted?(
+                <div style={{ background:"#00ff8818",border:"1px solid #00ff8844",borderRadius:10,padding:"14px",textAlign:"center",marginBottom:14 }}>
+                  <div style={{ fontSize:10,color:"#00ff88",letterSpacing:3,marginBottom:4 }}>YOUR SCORE</div>
+                  <div style={{ fontSize:32,color:"#00ff88",fontWeight:"bold" }}>{wc.score}</div>
+                  <div style={{ fontSize:10,color:mutedColor,marginTop:4 }}>Locked in for this week</div>
+                </div>
+              ):(
+                <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"14px",textAlign:"center",marginBottom:14 }}>
+                  <div style={{ fontSize:12,color:mutedColor }}>Complete all 3 modules to set your weekly score.</div>
+                  <div style={{ fontSize:11,color:"#ffcc00",marginTop:6 }}>Reward: +100 XP bonus 🏆</div>
+                </div>
+              )}
+              <button onClick={()=>setShowWeekly(false)} style={{ width:"100%",background:"transparent",border:`1px solid ${borderColor}`,color:mutedColor,padding:"14px",fontSize:13,letterSpacing:3,cursor:"pointer",borderRadius:10,fontFamily:"inherit" }}>CLOSE</button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Onboarding overlay */}
       {showOnboard&&(
         <div style={{ position:"fixed",inset:0,background:"#050a0f",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px" }}>
@@ -2679,6 +2962,106 @@ export default function MathGame() {
         <h1 style={{ fontSize:"clamp(44px,11vw,72px)", color:textColor, margin:"0 0 4px", textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844", animation:"glitch 3s infinite", letterSpacing:3 }}>BRain<span style={{color:"#00ff88"}}>_</span>TRain</h1>
         <div style={{ color:"#00ff88", fontSize:13, letterSpacing:5, marginBottom:24, opacity:0.7 }}>COGNITIVE TRAINING SYSTEM v3.0</div>
 
+        {/* ── DAILY CHALLENGE + TODAY PROGRESS ── */}
+        {(()=>{
+          const dp = dailyProgress;
+          const challMods = getDailyChallengeMods();
+          const modMeta = {
+  math:     { icon:"🧮", col:"#00ff88", label:"Math" },
+  vocab:    { icon:"📚", col:"#a78bfa", label:"Vocab" },
+  memory:   { icon:"🧠", col:"#f59e0b", label:"Memory" },
+  reflex:   { icon:"⚡", col:"#ff6b35", label:"Reflex" },
+  pattern:  { icon:"🎨", col:"#ec4899", label:"Pattern" },
+  spatial:  { icon:"🌀", col:"#06b6d4", label:"Spatial" },
+  dualnback:{ icon:"🔮", col:"#8b5cf6", label:"N-Back" },
+};
+          const allMods = Object.keys(modMeta);
+          const playedToday = allMods.filter(m=>dp.modules&&dp.modules[m]);
+          const challDone = challMods.every(m=>dp.modules&&dp.modules[m]);
+          const wc = weeklyData;
+          const weeklyMods = getWeeklyModules();
+          const weeklyDone = weeklyMods.every(m=>dp.modules&&dp.modules[m]);
+
+          return (
+            <>
+              {/* Daily Challenge card */}
+              <div style={{ background:challDone?"#00ff8812":cardBg,border:`1px solid ${challDone?"#00ff8844":borderColor}`,borderRadius:10,padding:"12px 16px",marginBottom:10 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                  <div style={{ fontSize:10,color:challDone?"#00ff88":"#ffcc00",letterSpacing:3 }}>
+                    {challDone?"✅ DAILY CHALLENGE DONE!":"📋 DAILY CHALLENGE"}
+                  </div>
+                  <button onClick={()=>setShowWeekly(true)} style={{ background:"transparent",border:"1px solid #ffcc0044",color:"#ffcc00",padding:"4px 10px",fontSize:9,cursor:"pointer",borderRadius:6,fontFamily:"inherit",letterSpacing:1 }}>📅 WEEKLY</button>
+                </div>
+                <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                  {challMods.map(m=>{
+                    const meta=modMeta[m]||{icon:"🎮",col:"#fff"};
+                    const done=dp.modules&&dp.modules[m];
+                    return (
+                      <div key={m} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,flex:1 }}>
+                        <div style={{ fontSize:20,filter:done?"none":"grayscale(1) opacity(0.4)" }}>{meta.icon}</div>
+                        <div style={{ width:"100%",height:4,background:done?meta.col:"#1a3040",borderRadius:2,transition:"background 0.4s" }} />
+                      </div>
+                    );
+                  })}
+                  <div style={{ fontSize:10,color:challDone?"#00ff88":"#ffcc00",paddingLeft:4,whiteSpace:"nowrap" }}>
+                    {challMods.filter(m=>dp.modules&&dp.modules[m]).length}/{challMods.length}
+                    {challDone&&<span style={{ color:"#ffcc00",display:"block",fontSize:9 }}>+50 XP!</span>}
+                  </div>
+                </div>
+                {!challDone&&(
+                  <div style={{ fontSize:9,color:mutedColor,marginTop:6 }}>
+                    Complete {challMods.map(m=>(modMeta[m]||{label:m}).label).join(" + ")} today for +50 XP bonus
+                  </div>
+                )}
+              </div>
+
+              {/* Today's activity tracker */}
+              {playedToday.length>0&&(
+                <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"10px 14px",marginBottom:10 }}>
+                  <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:8 }}>TODAY'S ACTIVITY</div>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {allMods.map(m=>{
+                      const meta=modMeta[m]||{icon:"🎮",col:"#fff",label:m};
+                      const done=dp.modules&&dp.modules[m];
+                      return (
+                        <div key={m} style={{ display:"flex",alignItems:"center",gap:4,background:done?`${meta.col}18`:"transparent",border:`1px solid ${done?`${meta.col}44`:borderColor}`,borderRadius:20,padding:"4px 8px",opacity:done?1:0.3 }}>
+                          <span style={{ fontSize:13 }}>{meta.icon}</span>
+                          <span style={{ fontSize:9,color:done?meta.col:mutedColor }}>{meta.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {playedToday.length>=3&&(
+                    <div style={{ fontSize:9,color:"#ffcc00",marginTop:6 }}>
+                      🔥 {playedToday.length} module{playedToday.length>1?"s":""} today
+                      {playedToday.length===3?" · +30 XP COMBO!":playedToday.length===5?" · +75 XP COMBO!":playedToday.length===7?" · +150 XP MASTER!":""}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
+
+        {/* ── Daily Challenge completed flash ── */}
+        {dailyChallengeDone&&(
+          <div style={{ position:"fixed",inset:0,zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
+            <div style={{ background:"linear-gradient(135deg,#ffcc00,#ff6b35)",borderRadius:20,padding:"28px 36px",textAlign:"center",animation:"popIn 0.4s ease",boxShadow:"0 0 60px #ffcc0088" }}>
+              <div style={{ fontSize:52,marginBottom:8 }}>🏆</div>
+              <div style={{ fontSize:22,color:"#050a0f",fontWeight:"bold",letterSpacing:3 }}>DAILY CHALLENGE</div>
+              <div style={{ fontSize:14,color:"#050a0f",marginTop:4,letterSpacing:2 }}>COMPLETE! +200 XP BONUS</div>
+            </div>
+          </div>
+        )}
+
+        {/* ── New personal record flash ── */}
+        {newRecord&&(
+          <div style={{ position:"fixed",top:"max(env(safe-area-inset-top),20px)",left:"50%",transform:"translateX(-50%)",zIndex:400,background:"#ffcc0022",border:"2px solid #ffcc00",borderRadius:12,padding:"12px 20px",textAlign:"center",animation:"fadeIn 0.3s ease",whiteSpace:"nowrap" }}>
+            <div style={{ fontSize:13,color:"#ffcc00",fontWeight:"bold" }}>🏆 NEW PERSONAL BEST!</div>
+            <div style={{ fontSize:11,color:"#fff",marginTop:2 }}>{newRecord.module}: {newRecord.score}</div>
+          </div>
+        )}
+
         {/* XP penalty notification */}
         {xpPenaltyInfo&&(
           <div style={{ background:"#ff446618",border:"1px solid #ff446666",borderRadius:10,padding:"12px 16px",marginBottom:12,textAlign:"left",animation:"fadeIn 0.5s ease" }}>
@@ -2701,6 +3084,72 @@ export default function MathGame() {
             <span style={{ fontSize:10, color:mutedColor }}>💡 {powerups.fifty}×50/50 · {powerups.time}×+10s · {powerups.skip}×skip</span>
           </div>
         </div>
+
+        {/* ── Daily Challenge card ── */}
+        {(()=>{
+          const dc = getDailyChallenge();
+          const mpt = getModulesPlayedToday();
+          const modIcons = { math:"🧮",vocab:"📚",sudoku:"🔢",reflex:"⚡",memory:"🧠",pattern:"🎨",spatial:"🌀",dualnback:"🔮" };
+          const modLabels = { math:"Math",vocab:"Vocab",sudoku:"Sudoku",reflex:"Reflex",memory:"Memory",pattern:"Pattern",spatial:"Spatial",dualnback:"N-Back" };
+          const doneCount = dc.modules.filter(m=>mpt[m]>0).length;
+          return (
+            <div style={{ background:dc.completed?"#ffcc0018":cardBg, border:`1px solid ${dc.completed?"#ffcc00":"#ff6b3566"}`, borderRadius:12, padding:"14px 16px", marginBottom:12, cursor:"pointer" }}
+              onClick={()=>setShowDailyPanel(p=>!p)}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <div>
+                  <div style={{ fontSize:10,color:dc.completed?"#ffcc00":"#ff6b35",letterSpacing:3,marginBottom:2 }}>
+                    {dc.completed?"✅ DAILY CHALLENGE COMPLETE!":"🎯 DAILY CHALLENGE"}
+                  </div>
+                  <div style={{ fontSize:12,color:"#fff" }}>
+                    {dc.modules.map(m=>modIcons[m]).join(" ")} — {doneCount}/{dc.modules.length} done
+                  </div>
+                </div>
+                <div style={{ fontSize:12,color:mutedColor }}>{showDailyPanel?"▲":"▼"}</div>
+              </div>
+              {showDailyPanel&&(
+                <div style={{ marginTop:12,paddingTop:10,borderTop:`1px solid ${borderColor}` }}>
+                  <div style={{ fontSize:9,color:mutedColor,letterSpacing:2,marginBottom:8 }}>Complete all 3 for +200 XP bonus</div>
+                  {dc.modules.map(m=>{
+                    const done = mpt[m]>0;
+                    return (
+                      <div key={m} style={{ display:"flex",alignItems:"center",gap:10,marginBottom:6 }}>
+                        <span style={{ fontSize:18 }}>{modIcons[m]}</span>
+                        <span style={{ fontSize:12,color:done?"#00ff88":"#fff",flex:1 }}>{modLabels[m]}</span>
+                        <span style={{ fontSize:14 }}>{done?"✅":"⬜"}</span>
+                      </div>
+                    );
+                  })}
+                  {!dc.completed&&<div style={{ fontSize:10,color:"#ffcc00",marginTop:6,textAlign:"center" }}>🏆 Complete all 3 to earn +200 XP!</div>}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Combo streak + session stats ── */}
+        {(()=>{
+          const mpt = getModulesPlayedToday();
+          const uniqueToday = Object.keys(mpt).length;
+          const totalSessions = save.totalSessionsAll || 0;
+          const comboStreak = save.comboStreakDays || 0;
+          if (uniqueToday===0 && comboStreak===0) return null;
+          return (
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12 }}>
+              <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"10px 8px",textAlign:"center" }}>
+                <div style={{ fontSize:18,color:"#ff6b35",fontWeight:"bold" }}>{uniqueToday}</div>
+                <div style={{ fontSize:8,color:mutedColor,letterSpacing:1,marginTop:2 }}>MODULES TODAY</div>
+              </div>
+              <div style={{ background:cardBg,border:`1px solid ${comboStreak>=3?"#ffcc0044":borderColor}`,borderRadius:10,padding:"10px 8px",textAlign:"center" }}>
+                <div style={{ fontSize:18,color:comboStreak>=3?"#ffcc00":"#fff",fontWeight:"bold" }}>{comboStreak}</div>
+                <div style={{ fontSize:8,color:mutedColor,letterSpacing:1,marginTop:2 }}>COMBO DAYS</div>
+              </div>
+              <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"10px 8px",textAlign:"center" }}>
+                <div style={{ fontSize:18,color:"#a78bfa",fontWeight:"bold" }}>{totalSessions}</div>
+                <div style={{ fontSize:8,color:mutedColor,letterSpacing:1,marginTop:2 }}>TOTAL SESSIONS</div>
+              </div>
+            </div>
+          );
+        })()}
 
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:24 }}>
           {/* Math */}
@@ -2840,6 +3289,8 @@ export default function MathGame() {
         {showBrainScore&&(()=>{
           const bs = calcBrainScore();
           const history = loadBrainScoreHistory();
+          const dp2 = loadDailyProgress();
+          const wc2 = loadWeeklyChallenge();
           const domainConfig = [
             { key:"math",    label:"MATH",    icon:"🧮", col:"#00ff88" },
             { key:"dualnback",label:"N-BACK",  icon:"🔮", col:"#8b5cf6" },
@@ -2872,6 +3323,21 @@ export default function MathGame() {
                   <div style={{ fontSize:11,color:"#ffcc00",marginTop:8 }}>
                     {bs.overall>=800?"🏆 ELITE COGNITIVE ATHLETE":bs.overall>=600?"⭐ ADVANCED THINKER":bs.overall>=400?"✅ SOLID PERFORMER":bs.overall>=200?"📈 DEVELOPING SKILLS":"🌱 JUST GETTING STARTED — KEEP GOING!"}
                   </div>
+                </div>
+
+                {/* Streak + daily stats row */}
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14 }}>
+                  {[
+                    { label:"DAY STREAK", val:dailyStreak.count, icon:"🔥", col:"#ff6b35" },
+                    { label:"TODAY",      val:Object.keys(dp2.modules||{}).length+"/7", icon:"📋", col:"#00ff88" },
+                    { label:"WEEKLY",     val:wc2.attempted?`${(getWeeklyModules().filter(m=>dp2.modules&&dp2.modules[m]).length)}/3`:"0/3", icon:"📅", col:"#ffcc00" },
+                  ].map(s=>(
+                    <div key={s.label} style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:8,padding:"10px 8px",textAlign:"center" }}>
+                      <div style={{ fontSize:20 }}>{s.icon}</div>
+                      <div style={{ fontSize:16,color:s.col,fontWeight:"bold",marginTop:2 }}>{s.val}</div>
+                      <div style={{ fontSize:8,color:mutedColor,letterSpacing:1,marginTop:2 }}>{s.label}</div>
+                    </div>
+                  ))}
                 </div>
 
                 {/* Domain radar — 6 bars */}
@@ -2976,6 +3442,41 @@ export default function MathGame() {
                     ));
                   })()}
                 </div>
+
+                {/* Personal Records */}
+                {(()=>{
+                  const pr = save.personalRecords || {};
+                  const modIcons2 = { math:"🧮",vocab:"📚",sudoku:"🔢",reflex:"⚡",memory:"🧠",pattern:"🎨",spatial:"🌀",dualnback:"🔮" };
+                  const entries = Object.entries(pr);
+                  if (entries.length===0) return null;
+                  return (
+                    <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"14px 18px",marginBottom:14 }}>
+                      <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:10 }}>🏆 PERSONAL RECORDS</div>
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                        {entries.map(([k,v])=>(
+                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#ffffff08",borderRadius:8 }}>
+                            <span style={{ fontSize:18 }}>{modIcons2[k]||"🎯"}</span>
+                            <div>
+                              <div style={{ fontSize:9,color:mutedColor,letterSpacing:1 }}>{k.toUpperCase()}</div>
+                              <div style={{ fontSize:13,color:"#ffcc00",fontWeight:"bold" }}>{v}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Combo streak info */}
+                {(save.comboStreakDays||0)>0&&(
+                  <div style={{ background:cardBg,border:"1px solid #ffcc0044",borderRadius:10,padding:"12px 18px",marginBottom:14,display:"flex",alignItems:"center",gap:12 }}>
+                    <span style={{ fontSize:28 }}>🔥</span>
+                    <div>
+                      <div style={{ fontSize:11,color:"#ffcc00",letterSpacing:2 }}>{save.comboStreakDays} DAY COMBO STREAK</div>
+                      <div style={{ fontSize:10,color:mutedColor }}>Playing 3+ modules per day. Keep it up!</div>
+                    </div>
+                  </div>
+                )}
 
                 <button onClick={()=>setShowBrainScore(false)}
                   style={{ width:"100%",background:"transparent",border:`1px solid ${borderColor}`,color:mutedColor,padding:"16px",fontSize:13,letterSpacing:3,cursor:"pointer",borderRadius:10,fontFamily:"inherit",minHeight:52 }}>
