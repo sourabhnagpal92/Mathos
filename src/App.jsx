@@ -1192,6 +1192,59 @@ function persistAll() {
   writeSave(save);
 }
 
+// ── Analytics & Insights persistence ──
+const ANALYTICS_KEY = "bt_analytics_v1";
+
+function loadAnalytics() {
+  try { const r=localStorage.getItem(ANALYTICS_KEY); return r?JSON.parse(r):{sessions:[],accuracy:[]}; }
+  catch(e){return {sessions:[],accuracy:[]};}
+}
+
+function saveAnalytics(data) {
+  try { localStorage.setItem(ANALYTICS_KEY, JSON.stringify(data)); } catch(e){}
+}
+
+function recordSessionAnalytics(moduleKey, accuracy, durationMs) {
+  const data = loadAnalytics();
+  const hour = new Date().getHours();
+  const entry = { module:moduleKey, accuracy, durationMs, hour, ts:Date.now() };
+  data.sessions.push(entry);
+  if (data.sessions.length > 200) data.sessions.shift(); // keep last 200
+  saveAnalytics(data);
+}
+
+function getTimeOfDayInsights() {
+  const data = loadAnalytics();
+  if (data.sessions.length < 5) return null;
+  // Group by hour bucket: morning(5-11), afternoon(12-16), evening(17-21), night(22-4)
+  const buckets = { morning:{label:"Morning",emoji:"🌅",hours:[5,6,7,8,9,10,11],sessions:[]}, afternoon:{label:"Afternoon",emoji:"☀️",hours:[12,13,14,15,16],sessions:[]}, evening:{label:"Evening",emoji:"🌆",hours:[17,18,19,20,21],sessions:[]}, night:{label:"Night",emoji:"🌙",hours:[22,23,0,1,2,3,4],sessions:[]} };
+  data.sessions.forEach(s => {
+    for (const [key,b] of Object.entries(buckets)) {
+      if (b.hours.includes(s.hour)) { b.sessions.push(s); break; }
+    }
+  });
+  const result = Object.entries(buckets)
+    .filter(([,b])=>b.sessions.length>0)
+    .map(([key,b])=>{
+      const avg = Math.round(b.sessions.reduce((s,x)=>s+x.accuracy,0)/b.sessions.length);
+      return { key, label:b.label, emoji:b.emoji, sessions:b.sessions.length, avgAccuracy:avg };
+    })
+    .sort((a,b)=>b.avgAccuracy-a.avgAccuracy);
+  return result;
+}
+
+function getFatigueSignal(moduleKey, recentAccuracies) {
+  // recentAccuracies = array of last N accuracy values this session, newest last
+  if (recentAccuracies.length < 4) return null;
+  const first = recentAccuracies.slice(0, Math.floor(recentAccuracies.length/2));
+  const last  = recentAccuracies.slice(Math.floor(recentAccuracies.length/2));
+  const firstAvg = first.reduce((s,v)=>s+v,0)/first.length;
+  const lastAvg  = last.reduce((s,v)=>s+v,0)/last.length;
+  const drop = firstAvg - lastAvg;
+  if (drop >= 20) return { drop:Math.round(drop), severe:drop>=30 };
+  return null;
+}
+
 // ── Cross-module helpers ──
 const TODAY = () => new Date().toDateString();
 
@@ -1498,6 +1551,7 @@ export default function MathGame() {
   const [reflexRoundIdx, setReflexRoundIdx] = useState(0);
   const [reflexTimes, setReflexTimes] = useState([]);
   const [reflexStart, setReflexStart] = useState(null);
+  const reflexStartRef = React.useRef(null); // always-current ref — fixes stale state on tap
   const [reflexResult, setReflexResult] = useState(null); // ms or "early"
   const [reflexTimer, setReflexTimer] = useState(null);
   const [reflexDifficulty, setReflexDifficulty] = useState("medium");
@@ -1542,6 +1596,8 @@ export default function MathGame() {
   const [newRecord, setNewRecord] = useState(null);    // { module, score } — shown briefly
   const [comboUnlocked, setComboUnlocked] = useState(false);
   const [showDailyPanel, setShowDailyPanel] = useState(false);
+  const [sessionAccHistory, setSessionAccHistory] = useState([]); // rolling accuracy per question
+  const [showFatigueAlert, setShowFatigueAlert] = useState(false);
   const [showWeekly, setShowWeekly]         = useState(false);
   const [dailyProgress, setDailyProgress]   = useState(()=>loadDailyProgress());
   const [weeklyData, setWeeklyData]         = useState(()=>loadWeeklyChallenge());
@@ -1575,6 +1631,12 @@ export default function MathGame() {
   const [dnTimer, setDnTimer]           = useState(null);
   const [dnFeedback, setDnFeedback]     = useState(null);      // brief flash {pos,let}
   const [dnHighScore, setDnHighScore]   = useState(()=>{ try{return JSON.parse(localStorage.getItem("bt_dnback_hs")||"null");}catch(e){return null;} });
+  // Refs for N-back responses — always current, no stale closure
+  const dnPosAnsweredRef = React.useRef(false);
+  const dnLetAnsweredRef = React.useRef(false);
+  const dnIdxRef         = React.useRef(0);
+  const dnSeqRef         = React.useRef([]);
+  const dnNRef           = React.useRef(2);
 
   const [showOnboard, setShowOnboard] = useState(false); // only show when user triggers it
   const [playerName, setPlayerName] = useState(vocabSave.userName||"");
@@ -1867,7 +1929,9 @@ export default function MathGame() {
     setVocabSessionStart(Date.now()); setVocabXpEarned(0);
     setVocabQ(null);
     markModulePlayed("vocab");
+    recordModulePlayed("vocab");
     setSessionModules(prev => { const n=new Set(prev); n.add("vocab"); checkCombo(n); return n; });
+    if(checkDailyChallengeComplete()){setDailyChallengeAdone(true);setTimeout(()=>setDailyChallengeAdone(false),4000);setXp(x=>{const nx=x+200;globalXP=nx;persistAll();return nx;});}
     setVocabScreen("game");
   }
 
@@ -1894,8 +1958,10 @@ export default function MathGame() {
       }, fakeAt);
     }
     t = setTimeout(() => {
+      const now = Date.now();
+      reflexStartRef.current = now;
+      setReflexStart(now);
       setReflexColor("green");
-      setReflexStart(Date.now());
       setReflexPhase("go");
     }, delay);
     setReflexTimer(t);
@@ -1911,12 +1977,11 @@ export default function MathGame() {
       return;
     }
     if (reflexPhase==="go") {
-      const ms = Date.now() - reflexStart;
+      const ms = Date.now() - (reflexStartRef.current || Date.now());
       try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}
       setReflexResult(ms);
       setReflexTimes(prev => [...prev, ms]);
       setReflexPhase("result");
-      // XP based on speed
       const xpEarned = ms<150?20:ms<200?14:ms<250?10:ms<300?7:4;
       setXp(x=>{ const nx=x+xpEarned; globalXP=nx; persistAll(); return nx; });
       return;
@@ -1929,7 +1994,8 @@ export default function MathGame() {
         const validTimes = [...reflexTimes, typeof reflexResult==="number"?reflexResult:null].filter(Boolean);
         if (validTimes.length > 0) {
           const avg = Math.round(validTimes.reduce((a,b)=>a+b,0)/validTimes.length);
-          if (!reflexPB || avg < reflexPB) {
+          recordSessionAnalytics("reflex", Math.max(0,Math.min(100,Math.round(((400-avg)/250)*100))), 0);
+        if (!reflexPB || avg < reflexPB) {
             setReflexPB(avg);
             try{ localStorage.setItem("braintrain_reflex_pb", JSON.stringify(avg)); }catch(e){}
           }
@@ -1945,6 +2011,7 @@ export default function MathGame() {
   function startReflexGame() {
     setReflexTimes([]); setReflexRoundIdx(0); setReflexResult(null);
     markModulePlayed("reflex");
+    recordModulePlayed("reflex");
     setSessionModules(prev => { const n=new Set(prev); n.add("reflex"); checkCombo(n); return n; });
     startReflexRound();
   }
@@ -2048,7 +2115,7 @@ export default function MathGame() {
     const xpEarned = errors===0 ? (memDiff==="easy"?10:memDiff==="medium"?18:28) :
                      errors<=2  ? (memDiff==="easy"?5:memDiff==="medium"?10:16) : 2;
     setXp(x => { const nx=x+xpEarned; globalXP=nx; persistAll(); return nx; });
-    setMemRoundResults(prev => { const nr=[...prev,{correct,total,errors,perfect:errors===0}]; if(nr.length===memRounds){const sc=nr.filter(r=>r.perfect).length*100+nr.reduce((s,r)=>s+r.correct,0)*10; if(updatePersonalRecord("memory",sc)){setNewRecord({module:"Memory",score:sc});setTimeout(()=>setNewRecord(null),3000);}} return nr; });
+    setMemRoundResults(prev => { const nr=[...prev,{correct,total,errors,perfect:errors===0}]; if(nr.length===memRounds){const sc=nr.filter(r=>r.perfect).length*100+nr.reduce((s,r)=>s+r.correct,0)*10; const macc=Math.round(nr.reduce((s,r)=>s+(r.correct/r.total),0)/nr.length*100); recordSessionAnalytics("memory",macc,0); if(updatePersonalRecord("memory",sc)){setNewRecord({module:"Memory",score:sc});setTimeout(()=>setNewRecord(null),3000);}} return nr; });
     setMemPhase("result");
   }
 
@@ -2066,7 +2133,9 @@ export default function MathGame() {
   function startMemGame() {
     setMemRoundIdx(0); setMemRoundResults([]); setMemTapped([]); setMemErrors(0); setMemLives(3);
     markModulePlayed("memory");
+    recordModulePlayed("memory");
     setSessionModules(prev => { const n=new Set(prev); n.add("memory"); checkCombo(n); return n; });
+    if(checkDailyChallengeComplete()){setDailyChallengeAdone(true);setTimeout(()=>setDailyChallengeAdone(false),4000);setXp(x=>{const nx=x+200;globalXP=nx;persistAll();return nx;});}
     startMemRound(0);
   }
 
@@ -2331,7 +2400,7 @@ export default function MathGame() {
 
   function advanceSpatRound() {
     const next = spatRoundIdx+1;
-    if (next>=spatRounds) { if(updatePersonalRecord("spatial",spatScore)){setNewRecord({module:"Spatial",score:spatScore});setTimeout(()=>setNewRecord(null),3000);} setSpatPhase("summary"); return; }
+    if (next>=spatRounds) { recordSessionAnalytics("spatial",Math.round((spatCorrect/(spatRoundIdx+1))*100),0); if(updatePersonalRecord("spatial",spatScore)){setNewRecord({module:"Spatial",score:spatScore});setTimeout(()=>setNewRecord(null),3000);} setSpatPhase("summary"); return; }
     setSpatRoundIdx(next);
     setSpatQ(spatMakeQuestion(spatDiff));
     setSpatSelected(null);
@@ -2397,6 +2466,11 @@ export default function MathGame() {
     markModulePlayed("dualnback");
     setSessionModules(prev => { const n=new Set(prev); n.add("dualnback"); checkCombo(n); return n; });
     const seq = dnBuildSequence(dnN, dnRounds);
+    dnSeqRef.current = seq;
+    dnIdxRef.current = 0;
+    dnPosAnsweredRef.current = false;
+    dnLetAnsweredRef.current = false;
+    dnNRef.current = dnN;
     setDnSequence(seq);
     setDnIdx(0);
     setDnResults([]);
@@ -2412,10 +2486,16 @@ export default function MathGame() {
 
   function dnShowNext(seq, idx, n) {
     if (idx >= seq.length) {
+      { const dnValid2=dnResults.filter(r=>r!==null); const dnacc=dnValid2.length>0?Math.round((dnValid2.filter(r=>r.posCorrect).length+dnValid2.filter(r=>r.letCorrect).length)/(dnValid2.length*2)*100):0; recordSessionAnalytics("dualnback",dnacc,0); }
       if(updatePersonalRecord("dualnback",dnScore)){setNewRecord({module:"N-Back",score:dnScore});setTimeout(()=>setNewRecord(null),3000);}
       setDnPhase("summary");
       return;
     }
+    dnPosAnsweredRef.current = false;
+    dnLetAnsweredRef.current = false;
+    dnIdxRef.current = idx;
+    dnSeqRef.current = seq;
+    dnNRef.current = n;
     setDnShowStimulus(true);
     setDnPosAnswered(false);
     setDnLetAnswered(false);
@@ -2437,12 +2517,17 @@ export default function MathGame() {
   }
 
   function handleDnResponse(type) {
-    // type = "pos" | "let"
     if (!dnShowStimulus) return;
-    if (type==="pos" && dnPosAnswered) return;
-    if (type==="let" && dnLetAnswered) return;
-    if (type==="pos") setDnPosAnswered(true);
-    if (type==="let") setDnLetAnswered(true);
+    if (type==="pos") {
+      if (dnPosAnsweredRef.current) return;
+      dnPosAnsweredRef.current = true;
+      setDnPosAnswered(true);
+    }
+    if (type==="let") {
+      if (dnLetAnsweredRef.current) return;
+      dnLetAnsweredRef.current = true;
+      setDnLetAnswered(true);
+    }
   }
 
   // Score a trial at end of stimulus — called via useEffect watching dnShowStimulus
@@ -2511,7 +2596,9 @@ export default function MathGame() {
     }
     setInputError("");
     markModulePlayed("math");
+    recordModulePlayed("math");
     setSessionModules(prev => { const n=new Set(prev); n.add("math"); checkCombo(n); return n; });
+    if(checkDailyChallengeComplete()){setDailyChallengeAdone(true);setTimeout(()=>setDailyChallengeAdone(false),4000);setXp(x=>{const nx=x+200;globalXP=nx;persistAll();return nx;});};
     setLives(3); setAdaptiveLevel(0); setConsCorrect(0); setConsWrong(0);
     setScore(0); setStreak(0); setMaxStreak(0); setTotalCorrect(0); setTotalAnswered(0);
     sessionHistory=[];
@@ -2546,17 +2633,27 @@ export default function MathGame() {
   useEffect(() => { if (screen==="game") loadQuestion(levelIdx); }, [screen,levelIdx,loadQuestion]);
 
   // ── Dual N-Back: score trial when stimulus disappears ──
+  // Uses refs (not state) so values are always fresh — no stale closure bug
   useEffect(() => {
-    if (appMode==="dualnback" && dnPhase==="playing" && !dnShowStimulus && dnSequence.length>0 && dnIdx>=dnN) {
-      const result = dnScoreTrial(dnSequence, dnIdx, dnN, dnPosAnswered, dnLetAnswered);
+    if (appMode==="dualnback" && dnPhase==="playing" && !dnShowStimulus) {
+      const idx = dnIdxRef.current;
+      const seq = dnSeqRef.current;
+      const n   = dnNRef.current;
+      if (seq.length === 0 || idx < n) return;
+      const posAns = dnPosAnsweredRef.current;
+      const letAns = dnLetAnsweredRef.current;
+      const result = dnScoreTrial(seq, idx, n, posAns, letAns);
       if (result) {
-        setDnResults(prev=>[...prev, result]);
-        const pts = (result.posCorrect?10:0)+(result.letCorrect?10:0);
-        if (pts>0) setDnScore(s=>s+pts);
-        setDnFeedback({ pos:result.posCorrect?"correct":result.posMatch?"miss":"ok", let:result.letCorrect?"correct":result.letMatch?"miss":"ok" });
+        setDnResults(prev => [...prev, result]);
+        const pts = (result.posCorrect?10:0) + (result.letCorrect?10:0);
+        if (pts > 0) setDnScore(s => s + pts);
+        setDnFeedback({
+          pos: result.posCorrect ? "correct" : result.posMatch ? "miss" : "ok",
+          let: result.letCorrect ? "correct" : result.letMatch ? "miss" : "ok"
+        });
       }
     }
-  }, [dnShowStimulus, dnIdx, appMode, dnPhase]);
+  }, [dnShowStimulus, appMode, dnPhase]);
 
   // ── Load vocab question when vocab game starts or question is null ──
   useEffect(() => {
@@ -2836,8 +2933,17 @@ export default function MathGame() {
 
 
     // ── HOME ──
+  // ── Fatigue alert overlay (shown across any module) ──
+  const FatigueAlert = showFatigueAlert ? (
+    <div style={{ position:"fixed", bottom:"max(env(safe-area-inset-bottom),24px)", left:"50%", transform:"translateX(-50%)", zIndex:300, background:"#ff6b3522", border:"2px solid #ff6b35", borderRadius:14, padding:"14px 20px", textAlign:"center", animation:"fadeIn 0.4s ease", maxWidth:"min(340px,90vw)", backdropFilter:"blur(4px)" }}>
+      <div style={{ fontSize:20, marginBottom:4 }}>😴 FATIGUE DETECTED</div>
+      <div style={{ fontSize:12, color:"#fff", marginBottom:4 }}>Your accuracy has dropped significantly.</div>
+      <div style={{ fontSize:11, color:"#ff6b35" }}>Consider taking a short break!</div>
+    </div>
+  ) : null;
+
   if (appMode==="home") return (
-    <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+    <>{FatigueAlert}<div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:bg, fontFamily:"'Courier New',monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"0 max(12px,3.5vw)", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ position:"fixed",inset:0,opacity:theme==="dark"?0.04:0.02, backgroundImage:"linear-gradient(#00ff88 1px,transparent 1px),linear-gradient(90deg,#00ff88 1px,transparent 1px)", backgroundSize:"40px 40px", pointerEvents:"none" }} />
       <style>{`@keyframes popIn{0%{transform:scale(0.5);opacity:0}100%{transform:scale(1);opacity:1}} @keyframes glitch{0%,100%{transform:translate(0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,2px)}80%{transform:translate(1px,-2px)}} @keyframes fadeIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}} @keyframes pop{0%{transform:scale(0);opacity:1}100%{transform:scale(2.5) translateY(-50px);opacity:0}}`}</style>
       {/* ── COMBO BONUS TOAST ── */}
@@ -3443,6 +3549,64 @@ export default function MathGame() {
                   })()}
                 </div>
 
+                {/* ── TIME OF DAY ANALYTICS ── */}
+                {(()=>{
+                  const tod = getTimeOfDayInsights();
+                  if (!tod || tod.length < 2) return null;
+                  const best = tod[0];
+                  return (
+                    <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:14 }}>
+                      <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>⏰ TIME OF DAY PERFORMANCE</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:10 }}>
+                        {tod.map(t=>(
+                          <div key={t.key} style={{ display:"flex", alignItems:"center", gap:10 }}>
+                            <span style={{ fontSize:16, width:24 }}>{t.emoji}</span>
+                            <span style={{ fontSize:10, color:"#fff", minWidth:72 }}>{t.label}</span>
+                            <div style={{ flex:1, height:6, background:"#0a1520", borderRadius:3, overflow:"hidden" }}>
+                              <div style={{ height:"100%", width:`${t.avgAccuracy}%`, background:t.avgAccuracy>=80?"#00ff88":t.avgAccuracy>=60?"#ffcc00":"#ff6b35", borderRadius:3, transition:"width 0.6s" }} />
+                            </div>
+                            <span style={{ fontSize:10, color:mutedColor, minWidth:42, textAlign:"right" }}>{t.avgAccuracy}% ({t.sessions})</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize:11, color:"#00ff88", textAlign:"center" }}>
+                        🧠 You perform best in the <strong>{best.emoji} {best.label}</strong> — {best.avgAccuracy}% avg
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── MODULE PERFORMANCE HISTORY ── */}
+                {(()=>{
+                  const data = loadAnalytics();
+                  if (data.sessions.length < 3) return null;
+                  // Group last 20 sessions by module
+                  const recent = data.sessions.slice(-20);
+                  const byMod = {};
+                  const modIcons3 = { math:"🧮",vocab:"📚",sudoku:"🔢",reflex:"⚡",memory:"🧠",pattern:"🎨",spatial:"🌀",dualnback:"🔮" };
+                  recent.forEach(s=>{ if(!byMod[s.module]) byMod[s.module]=[]; byMod[s.module].push(s.accuracy); });
+                  return (
+                    <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"14px 18px", marginBottom:14 }}>
+                      <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:10 }}>📈 RECENT PERFORMANCE BY MODULE</div>
+                      {Object.entries(byMod).map(([mod,accs])=>{
+                        const avg = Math.round(accs.reduce((s,v)=>s+v,0)/accs.length);
+                        const trend = accs.length>=2 ? accs[accs.length-1]-accs[0] : 0;
+                        return (
+                          <div key={mod} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                            <span style={{ fontSize:14 }}>{modIcons3[mod]||"🎯"}</span>
+                            <span style={{ fontSize:10, color:"#fff", minWidth:60 }}>{mod.toUpperCase()}</span>
+                            <div style={{ flex:1, height:5, background:"#0a1520", borderRadius:3, overflow:"hidden" }}>
+                              <div style={{ height:"100%", width:`${avg}%`, background:avg>=80?"#00ff88":avg>=60?"#ffcc00":"#ff6b35", borderRadius:3 }} />
+                            </div>
+                            <span style={{ fontSize:10, color:avg>=80?"#00ff88":avg>=60?"#ffcc00":"#ff6b35", minWidth:36 }}>{avg}%</span>
+                            <span style={{ fontSize:10, color:trend>5?"#00ff88":trend<-5?"#ff4466":mutedColor }}>{trend>5?"↑":trend<-5?"↓":"→"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
                 {/* Personal Records */}
                 {(()=>{
                   const pr = save.personalRecords || {};
@@ -3489,7 +3653,7 @@ export default function MathGame() {
 
       </div>
     </div>
-  );
+  </> );
 
 
   // ── VOCAB MODULE ──
@@ -5389,7 +5553,7 @@ export default function MathGame() {
 
             {/* ── RESULT (after each round) ── */}
             {reflexPhase==="result"&&(
-              <div style={{ animation:"popIn 0.3s ease", textAlign:"center" }} onClick={handleReflexTap}>
+              <div style={{ animation:"popIn 0.3s ease", textAlign:"center" }}>
                 <div style={{ marginBottom:20 }}>
                   <div style={{ fontSize:10, color:mutedColor, letterSpacing:4, marginBottom:8 }}>ROUND {reflexRoundIdx+1} / {reflexRounds}</div>
 
