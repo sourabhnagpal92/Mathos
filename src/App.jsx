@@ -3063,89 +3063,45 @@ export default function MathGame() {
         </div>
       )}
 
-      <div style={{ textAlign:"center", animation:"fadeIn 0.6s ease", maxWidth:"min(480px,100%)", width:"100%", paddingTop:"max(env(safe-area-inset-top), 40px)", paddingBottom:"max(env(safe-area-inset-bottom), 32px)" }}>
+      <div style={{ textAlign:"center", animation:"fadeIn 0.6s ease", maxWidth:"min(480px,100%)", width:"100%", paddingTop:"max(env(safe-area-inset-top), 40px)", paddingBottom:"max(env(safe-area-inset-bottom), 32px)", position:"relative" }}>
+        {/* Last updated stamp */}
+        <div style={{ position:"absolute", top:"max(env(safe-area-inset-top),12px)", right:"max(12px,3.5vw)", fontSize:9, color:mutedColor, letterSpacing:1, opacity:0.6, fontFamily:"'Courier New',monospace" }}>
+          v3.0 · 26 Apr 2025
+        </div>
         <div style={{ fontSize:10, letterSpacing:6, color:"#00ff88", marginBottom:8, opacity:0.6 }}>{playerName ? `WELCOME BACK, ${playerName.toUpperCase()}` : "SELECT MODULE"}</div>
         <h1 style={{ fontSize:"clamp(44px,11vw,72px)", color:textColor, margin:"0 0 4px", textShadow:"0 0 30px #00ff88,0 0 60px #00ff8844", animation:"glitch 3s infinite", letterSpacing:3 }}>BRain<span style={{color:"#00ff88"}}>_</span>TRain</h1>
         <div style={{ color:"#00ff88", fontSize:13, letterSpacing:5, marginBottom:24, opacity:0.7 }}>COGNITIVE TRAINING SYSTEM v3.0</div>
 
-        {/* ── DAILY CHALLENGE + TODAY PROGRESS ── */}
+        {/* ── TODAY'S ACTIVITY tracker ── */}
         {(()=>{
           const dp = dailyProgress;
-          const challMods = getDailyChallengeMods();
-          const modMeta = {
-  math:     { icon:"🧮", col:"#00ff88", label:"Math" },
-  vocab:    { icon:"📚", col:"#a78bfa", label:"Vocab" },
-  memory:   { icon:"🧠", col:"#f59e0b", label:"Memory" },
-  reflex:   { icon:"⚡", col:"#ff6b35", label:"Reflex" },
-  pattern:  { icon:"🎨", col:"#ec4899", label:"Pattern" },
-  spatial:  { icon:"🌀", col:"#06b6d4", label:"Spatial" },
-  dualnback:{ icon:"🔮", col:"#8b5cf6", label:"N-Back" },
-};
-          const allMods = Object.keys(modMeta);
+          const modMeta2 = { math:{icon:"🧮",col:"#00ff88",label:"Math"}, vocab:{icon:"📚",col:"#a78bfa",label:"Vocab"}, sudoku:{icon:"🔢",col:"#00cfff",label:"Sudoku"}, reflex:{icon:"⚡",col:"#ff6b35",label:"Reflex"}, memory:{icon:"🧠",col:"#f59e0b",label:"Memory"}, pattern:{icon:"🎨",col:"#ec4899",label:"Pattern"}, spatial:{icon:"🌀",col:"#06b6d4",label:"Spatial"}, dualnback:{icon:"🔮",col:"#8b5cf6",label:"N-Back"} };
+          const allMods = Object.keys(modMeta2);
           const playedToday = allMods.filter(m=>dp.modules&&dp.modules[m]);
-          const challDone = challMods.every(m=>dp.modules&&dp.modules[m]);
-          const wc = weeklyData;
-          const weeklyMods = getWeeklyModules();
-          const weeklyDone = weeklyMods.every(m=>dp.modules&&dp.modules[m]);
-
+          if (playedToday.length===0) return null;
           return (
-            <>
-              {/* Daily Challenge card */}
-              <div style={{ background:challDone?"#00ff8812":cardBg,border:`1px solid ${challDone?"#00ff8844":borderColor}`,borderRadius:10,padding:"12px 16px",marginBottom:10 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-                  <div style={{ fontSize:10,color:challDone?"#00ff88":"#ffcc00",letterSpacing:3 }}>
-                    {challDone?"✅ DAILY CHALLENGE DONE!":"📋 DAILY CHALLENGE"}
-                  </div>
-                  <button onClick={()=>setShowWeekly(true)} style={{ background:"transparent",border:"1px solid #ffcc0044",color:"#ffcc00",padding:"4px 10px",fontSize:9,cursor:"pointer",borderRadius:6,fontFamily:"inherit",letterSpacing:1 }}>📅 WEEKLY</button>
-                </div>
-                <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                  {challMods.map(m=>{
-                    const meta=modMeta[m]||{icon:"🎮",col:"#fff"};
-                    const done=dp.modules&&dp.modules[m];
-                    return (
-                      <div key={m} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,flex:1 }}>
-                        <div style={{ fontSize:20,filter:done?"none":"grayscale(1) opacity(0.4)" }}>{meta.icon}</div>
-                        <div style={{ width:"100%",height:4,background:done?meta.col:"#1a3040",borderRadius:2,transition:"background 0.4s" }} />
-                      </div>
-                    );
-                  })}
-                  <div style={{ fontSize:10,color:challDone?"#00ff88":"#ffcc00",paddingLeft:4,whiteSpace:"nowrap" }}>
-                    {challMods.filter(m=>dp.modules&&dp.modules[m]).length}/{challMods.length}
-                    {challDone&&<span style={{ color:"#ffcc00",display:"block",fontSize:9 }}>+50 XP!</span>}
-                  </div>
-                </div>
-                {!challDone&&(
-                  <div style={{ fontSize:9,color:mutedColor,marginTop:6 }}>
-                    Complete {challMods.map(m=>(modMeta[m]||{label:m}).label).join(" + ")} today for +50 XP bonus
-                  </div>
-                )}
-              </div>
-
-              {/* Today's activity tracker */}
-              {playedToday.length>0&&(
-                <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"10px 14px",marginBottom:10 }}>
-                  <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:8 }}>TODAY'S ACTIVITY</div>
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    {allMods.map(m=>{
-                      const meta=modMeta[m]||{icon:"🎮",col:"#fff",label:m};
-                      const done=dp.modules&&dp.modules[m];
-                      return (
-                        <div key={m} style={{ display:"flex",alignItems:"center",gap:4,background:done?`${meta.col}18`:"transparent",border:`1px solid ${done?`${meta.col}44`:borderColor}`,borderRadius:20,padding:"4px 8px",opacity:done?1:0.3 }}>
-                          <span style={{ fontSize:13 }}>{meta.icon}</span>
-                          <span style={{ fontSize:9,color:done?meta.col:mutedColor }}>{meta.label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {playedToday.length>=3&&(
-                    <div style={{ fontSize:9,color:"#ffcc00",marginTop:6 }}>
-                      🔥 {playedToday.length} module{playedToday.length>1?"s":""} today
-                      {playedToday.length===3?" · +30 XP COMBO!":playedToday.length===5?" · +75 XP COMBO!":playedToday.length===7?" · +150 XP MASTER!":""}
+            <div style={{ background:cardBg,border:`1px solid ${borderColor}`,borderRadius:10,padding:"10px 14px",marginBottom:10 }}>
+              <div style={{ fontSize:9,color:mutedColor,letterSpacing:3,marginBottom:8 }}>TODAY'S ACTIVITY</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {allMods.map(m=>{
+                  const meta=modMeta2[m];
+                  const done=dp.modules&&dp.modules[m];
+                  if (!done) return null;
+                  return (
+                    <div key={m} style={{ display:"flex",alignItems:"center",gap:4,background:`${meta.col}18`,border:`1px solid ${meta.col}44`,borderRadius:20,padding:"4px 8px" }}>
+                      <span style={{ fontSize:13 }}>{meta.icon}</span>
+                      <span style={{ fontSize:9,color:meta.col }}>{meta.label}</span>
                     </div>
-                  )}
+                  );
+                })}
+              </div>
+              {playedToday.length>=3&&(
+                <div style={{ fontSize:9,color:"#ffcc00",marginTop:6 }}>
+                  🔥 {playedToday.length} module{playedToday.length>1?"s":""} played today
+                  {playedToday.length===3?" · +30 XP COMBO!":playedToday.length===5?" · +75 XP COMBO!":playedToday.length>=7?" · +150 XP MASTER!":""}
                 </div>
               )}
-            </>
+            </div>
           );
         })()}
 
@@ -3210,7 +3166,10 @@ export default function MathGame() {
                     {dc.modules.map(m=>modIcons[m]).join(" ")} — {doneCount}/{dc.modules.length} done
                   </div>
                 </div>
-                <div style={{ fontSize:12,color:mutedColor }}>{showDailyPanel?"▲":"▼"}</div>
+                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                  <button onClick={e=>{e.stopPropagation();setShowWeekly(true);}} style={{ background:"transparent",border:"1px solid #ffcc0044",color:"#ffcc00",padding:"4px 10px",fontSize:9,cursor:"pointer",borderRadius:6,fontFamily:"inherit",letterSpacing:1,minHeight:30 }}>📅 WEEKLY</button>
+                  <div style={{ fontSize:12,color:mutedColor }}>{showDailyPanel?"▲":"▼"}</div>
+                </div>
               </div>
               {showDailyPanel&&(
                 <div style={{ marginTop:12,paddingTop:10,borderTop:`1px solid ${borderColor}` }}>
@@ -5551,10 +5510,12 @@ export default function MathGame() {
               </div>
             )}
 
-            {/* ── RESULT (after each round) ── */}
+            {/* ── RESULT (after each round) — tap anywhere to advance ── */}
             {reflexPhase==="result"&&(
-              <div style={{ animation:"popIn 0.3s ease", textAlign:"center" }}>
-                <div style={{ marginBottom:20 }}>
+              <div
+                onClick={handleReflexTap}
+                style={{ animation:"popIn 0.3s ease", textAlign:"center", cursor:"pointer", userSelect:"none", WebkitUserSelect:"none", touchAction:"manipulation" }}>
+                <div style={{ marginBottom:16 }}>
                   <div style={{ fontSize:10, color:mutedColor, letterSpacing:4, marginBottom:8 }}>ROUND {reflexRoundIdx+1} / {reflexRounds}</div>
 
                   {reflexResult==="early"?(
@@ -5579,7 +5540,7 @@ export default function MathGame() {
 
                 {/* Round history mini-bars */}
                 {reflexTimes.length>0&&(
-                  <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"12px 16px", marginBottom:16 }}>
+                  <div style={{ background:cardBg, border:`1px solid ${borderColor}`, borderRadius:10, padding:"12px 16px", marginBottom:12 }} onClick={e=>e.stopPropagation()}>
                     <div style={{ fontSize:9, color:mutedColor, letterSpacing:3, marginBottom:8 }}>ROUND HISTORY</div>
                     <div style={{ display:"flex", gap:4, alignItems:"flex-end", height:40 }}>
                       {reflexTimes.map((t,i)=>{
@@ -5588,17 +5549,16 @@ export default function MathGame() {
                         const col=t<150?"#ffcc00":t<200?"#00ff88":t<250?"#00cfff":t<300?"#a78bfa":"#ff6b35";
                         return <div key={i} style={{ flex:1, height:h, background:col, borderRadius:2, opacity:i===reflexTimes.length-1?1:0.6 }} />;
                       })}
-                      {Array.from({length:reflexRounds-reflexTimes.length}).map((_,i)=>(
+                      {Array.from({length:Math.max(0,reflexRounds-reflexTimes.length)}).map((_,i)=>(
                         <div key={"e"+i} style={{ flex:1, height:4, background:borderColor, borderRadius:2 }} />
                       ))}
                     </div>
                   </div>
                 )}
 
-                <button onClick={handleReflexTap}
-                  style={{ width:"100%", background:rcolLight, border:`2px solid ${rcol}`, color:rcol, padding:"16px", fontSize:14, letterSpacing:4, cursor:"pointer", borderRadius:10, fontFamily:"inherit", minHeight:54 }}>
-                  {reflexRoundIdx+1>=reflexRounds?"SEE RESULTS →":"NEXT ROUND →"}
-                </button>
+                <div style={{ fontSize:11, color:rcol+"88", letterSpacing:3, marginTop:10, animation:"pulse 1.5s ease infinite" }}>
+                  {reflexRoundIdx+1>=reflexRounds?"TAP ANYWHERE TO SEE RESULTS":"TAP ANYWHERE FOR NEXT ROUND"}
+                </div>
               </div>
             )}
 
