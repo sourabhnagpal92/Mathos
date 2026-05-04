@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 
 // ── Utilities ──
 function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -4660,7 +4660,7 @@ export default function MathGame() {
             {/* Original shape */}
             <div style={{ background:cardBg, border:`2px solid ${scol}`, borderRadius:14, padding:"20px", marginBottom:16, display:"flex", flexDirection:"column", alignItems:"center" }}>
               <div style={{ fontSize:9, color:scol, letterSpacing:4, marginBottom:12 }}>ORIGINAL SHAPE</div>
-              {renderShape(spatQ.base, scol, Math.min(120, Math.round(window?.innerWidth*0.28)||100))}
+              {renderShape(spatQ.base, scol, Math.min(120, typeof window!=='undefined'?Math.round(window.innerWidth*0.28):100))}
             </div>
 
             {/* 4 choices in 2×2 grid */}
@@ -4676,7 +4676,7 @@ export default function MathGame() {
                 return (
                   <button key={i} onClick={()=>handleSpatAnswer(i)} disabled={!!spatFeedback}
                     style={{ background:bg2, border:`2px solid ${border2}`, borderRadius:12, padding:"16px 10px", cursor:spatFeedback?"default":"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:8, transition:"all 0.15s", minHeight:120, touchAction:"manipulation" }}>
-                    {renderShape(c.pts, spatFeedback?(isCorrect?"#00ff88":i===spatSelected?"#ff4466":mutedColor):scol, Math.min(80, Math.round((window?.innerWidth||390)*0.18)||70))}
+                    {renderShape(c.pts, spatFeedback?(isCorrect?"#00ff88":i===spatSelected?"#ff4466":mutedColor):scol, Math.min(80, typeof window!=='undefined'?Math.round(window.innerWidth*0.18):70))}
                     {spatFeedback&&isCorrect&&<div style={{ fontSize:10, color:"#00ff88", letterSpacing:2 }}>✓ CORRECT</div>}
                     {spatFeedback&&i===spatSelected&&!isCorrect&&<div style={{ fontSize:10, color:"#ff4466", letterSpacing:2 }}>✗ WRONG</div>}
                   </button>
